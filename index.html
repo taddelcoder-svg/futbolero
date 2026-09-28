@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0c2a1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Futbolero">
+<meta name="format-detection" content="telephone=no">
+<meta name="robots" content="noindex, nofollow">
+<title>Futbolero – 3D-Fußball</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+<style>
+  /* Barlow Semi Condensed (SIL OFL 1.1), selbst ausgeliefert */
+  @font-face{font-family:'Barlow Semi Condensed';font-weight:600;font-display:swap;src:url(vendor/barlow-semi-condensed-600.woff2) format('woff2')}
+  @font-face{font-family:'Barlow Semi Condensed';font-weight:700;font-display:swap;src:url(vendor/barlow-semi-condensed-700.woff2) format('woff2')}
+  @font-face{font-family:'Barlow Semi Condensed';font-weight:800;font-display:swap;src:url(vendor/barlow-semi-condensed-800.woff2) format('woff2')}
+  :root{
+    --rasen:#146b3a;
+    --rasen-hell:#1a7d45;
+    --rasen-tief:#0c2a1a;
+    --kreide:#f4f7f2;
+    --flutlicht:#ffd84a;
+    --rot:#ff4d4d;
+    --tafel:#0b0f14;
+    --text:#f4f7f2;
+    box-sizing:border-box;
+  }
+  /* Das Spiel hat immer ein dunkles Stadion – beide Farbschemata sehen gleich aus */
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --rasen-tief:#0c2a1a; --text:#f4f7f2; } }
+  :root[data-theme="dark"]{ --rasen-tief:#0c2a1a; --text:#f4f7f2; }
+  *,*::before,*::after{box-sizing:inherit}
+  html,body{height:100%;margin:0;overflow:hidden;background:var(--rasen-tief);color:var(--text);
+    font-family:'Barlow Semi Condensed','Arial Narrow','Helvetica Neue',Arial,sans-serif;
+    touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;overscroll-behavior:none}
+  #spiel{position:fixed;inset:0;width:100%;height:100%;display:block}
+  button{font-family:inherit}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .4s}
+  .hud.an{opacity:1}
+  .anzeige{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));top:calc(12px + env(safe-area-inset-top,0px));
+    display:flex;align-items:stretch;border-radius:8px;overflow:hidden;background:var(--tafel);box-shadow:0 6px 22px rgba(0,0,0,.45);font-weight:800;font-size:22px;line-height:1}
+  .anzeige .team{display:flex;align-items:center;gap:8px;padding:8px 10px;letter-spacing:.02em}
+  .anzeige .chip{width:8px;align-self:stretch;border-radius:2px}
+  .anzeige .stand{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--kreide);color:var(--tafel);font-size:24px;font-variant-numeric:tabular-nums}
+  .anzeige .uhr{display:flex;align-items:center;padding:8px 12px;background:#1f2a36;color:var(--flutlicht);font-variant-numeric:tabular-nums;min-width:62px;justify-content:center}
+  .anzeige .nach{font-size:15px;margin-left:4px;color:var(--kreide);opacity:.85}
+  .meldung{position:absolute;left:50%;top:26%;transform:translate(-50%,-50%);text-align:center;white-space:nowrap;opacity:0}
+  .meldung b{display:block;font-size:clamp(44px,9vw,92px);font-weight:800;line-height:.9;letter-spacing:.01em;text-shadow:0 4px 0 rgba(0,0,0,.35),0 0 40px rgba(0,0,0,.45)}
+  .meldung span{display:block;margin-top:8px;font-size:clamp(18px,2.6vw,26px);font-weight:700;text-shadow:0 2px 10px rgba(0,0,0,.7)}
+  .meldung.zeigen{animation:meldung 1.8s ease-out forwards}
+  .meldung.bleiben{animation:meldungRein .35s ease-out forwards}
+  .meldung.tor b{color:var(--flutlicht);font-size:clamp(70px,15vw,160px)}
+  @keyframes meldung{0%{opacity:0;transform:translate(-50%,-40%) scale(.85)}12%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}20%{transform:translate(-50%,-50%) scale(1)}78%{opacity:1}100%{opacity:0;transform:translate(-50%,-56%)}}
+  @keyframes meldungRein{0%{opacity:0;transform:translate(-50%,-40%) scale(.85)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+  .kraft{position:absolute;left:50%;bottom:calc(30px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:min(260px,40vw);height:14px;border-radius:7px;
+    background:rgba(11,15,20,.6);border:2px solid rgba(255,255,255,.6);overflow:hidden;opacity:0;transition:opacity .15s}
+  .kraft.an{opacity:1}
+  .kraft i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#7ee081,var(--flutlicht) 70%,var(--rot))}
+  .radar{position:absolute;right:calc(14px + env(safe-area-inset-right,0px));top:calc(66px + env(safe-area-inset-top,0px));width:176px;height:114px;border-radius:6px;opacity:.9;transition:opacity .3s}
+  .radar.weg{opacity:0}
+  .wdh{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));top:calc(62px + env(safe-area-inset-top,0px));padding:6px 12px;border-radius:6px;background:var(--rot);font-weight:800;font-size:18px;letter-spacing:.06em;display:none}
+  .wdh.an{display:block;animation:blinken 1.2s infinite}
+  @keyframes blinken{50%{opacity:.55}}
+  .tipp{position:absolute;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translateX(-50%);padding:6px 14px;border-radius:99px;background:rgba(11,15,20,.6);font-weight:700;font-size:17px;white-space:nowrap;opacity:0;transition:opacity .4s}
+  .tipp.an{opacity:1}
+  .elfer{position:absolute;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);display:none;background:var(--tafel);border-radius:8px;padding:8px 12px;box-shadow:0 6px 22px rgba(0,0,0,.45)}
+  .elfer.an{display:block}
+  .elfer .reihe{display:flex;align-items:center;gap:6px;font-weight:800;font-size:18px;padding:2px 0}
+  .elfer .reihe b{width:44px}
+  .elfer i{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5)}
+  .elfer i.drin{background:#4cd964;border-color:#4cd964}
+  .elfer i.vorbei{background:var(--rot);border-color:var(--rot)}
+  .blende{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .25s}
+  .blende.an{opacity:1}
+
+  .rund{position:fixed;width:44px;height:44px;border-radius:50%;border:0;background:rgba(11,15,20,.55);color:#fff;font-size:18px;font-weight:800;cursor:pointer;
+    display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  .rund svg{width:20px;height:20px}
+  .hud.an ~ .rund{display:flex}
+  .pausenknopf{right:calc(14px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
+  .tonknopf{right:calc(66px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
+  .rund:focus-visible,.knopf:focus-visible,.wahl button:focus-visible,.pfeil:focus-visible{outline:3px solid var(--flutlicht);outline-offset:3px}
+
+  /* ---------- Touch ---------- */
+  .touch-ui{position:fixed;inset:0;pointer-events:none;display:none}
+  .touch .hud.an ~ .touch-ui{display:block}
+  .stickfeld{position:absolute;left:0;top:25%;bottom:0;width:50%;pointer-events:auto;touch-action:none}
+  .stick{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;pointer-events:none;opacity:.55;transition:opacity .15s}
+  .stick.an{opacity:1}
+  .stick .basis{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(11,15,20,.28)}
+  .stick .knauf{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(244,247,242,.85);box-shadow:0 4px 16px rgba(0,0,0,.4)}
+  .stick.sprint .knauf{background:var(--flutlicht)}
+  .tasten{position:absolute;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));width:210px;height:190px}
+  .tk{position:absolute;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(11,15,20,.4);color:#fff;font-weight:800;font-size:15px;
+    pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1;padding:0;transition:transform .08s, background .1s}
+  .tk.an{background:rgba(255,216,74,.45);border-color:var(--flutlicht);transform:scale(1.07)}
+  .tk[data-t="schuss"]{right:0;bottom:0;width:92px;height:92px;font-size:18px;background:rgba(255,77,77,.35)}
+  .tk[data-t="pass"]{right:104px;bottom:6px;width:74px;height:74px}
+  .tk[data-t="heber"]{right:10px;bottom:104px;width:66px;height:66px}
+  .tk[data-t="sprint"]{right:98px;bottom:96px;width:62px;height:62px;font-size:14px}
+  .touch .radar{width:132px;height:86px;top:calc(62px + env(safe-area-inset-top,0px))}
+  .touch .kraft{bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+
+  /* ---------- Menüs ---------- */
+  .ebene{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;transition:opacity .35s;background:rgba(5,12,8,.35)}
+  .ebene.aus{opacity:0;pointer-events:none}
+  .karte{position:relative;width:min(560px,100%);max-height:calc(100% - 8px);overflow:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch;border-radius:16px;padding:30px 30px 24px;color:var(--kreide);
+    background:repeating-linear-gradient(90deg,var(--rasen) 0 48px,var(--rasen-hell) 48px 96px);box-shadow:0 30px 80px rgba(0,0,0,.6);scrollbar-width:thin}
+  .karte::before{content:"";position:absolute;inset:10px;border:3px solid rgba(244,247,242,.85);border-radius:8px;pointer-events:none}
+  .karte > *{position:relative}
+  .titel{display:flex;align-items:center;gap:14px;margin:0}
+  .titel svg{width:58px;height:58px;flex:none;filter:drop-shadow(0 3px 0 rgba(0,0,0,.25))}
+  .titel h1{margin:0;font-size:clamp(46px,9vw,74px);font-weight:800;line-height:.9;letter-spacing:-.01em;text-shadow:0 3px 0 rgba(0,0,0,.25)}
+  .unter{font-size:20px;font-weight:600;margin:6px 0 18px;opacity:.92}
+  .zeile{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:2px solid rgba(244,247,242,.3);padding:8px 0;font-size:19px;font-weight:700}
+  .zeile > span{white-space:nowrap}
+  .wahl{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+  .wahl button{border:2px solid rgba(244,247,242,.55);background:rgba(0,0,0,.18);color:var(--kreide);font-weight:700;font-size:16px;padding:5px 10px;border-radius:6px;cursor:pointer}
+  .wahl button[aria-pressed="true"]{background:var(--kreide);color:var(--rasen);border-color:var(--kreide)}
+  .teamwahl{display:flex;align-items:center;gap:6px}
+  .teamwahl output{display:flex;align-items:center;gap:8px;min-width:130px;justify-content:center;font-size:20px;font-weight:800}
+  .trikot{width:22px;height:22px;flex:none}
+  .pfeil{width:34px;height:34px;border-radius:50%;border:2px solid rgba(244,247,242,.55);background:rgba(0,0,0,.18);color:var(--kreide);font-size:16px;font-weight:800;cursor:pointer;padding:0}
+  .steuerung{font-size:16px;font-weight:600;line-height:1.5;margin:14px 0 18px;opacity:.95}
+  .steuerung kbd{font-family:inherit;font-weight:800;background:rgba(0,0,0,.28);border-radius:4px;padding:0 6px}
+  .knopf{width:100%;border:0;border-radius:10px;background:var(--kreide);color:var(--rasen);font-weight:800;font-size:26px;padding:12px 16px;cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.25);transition:transform .1s}
+  .knopf:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.25)}
+  .knopf.zweit{background:rgba(0,0,0,.22);color:var(--kreide);border:2px solid rgba(244,247,242,.6);font-size:20px;padding:9px 14px;box-shadow:none}
+  .knoepfe{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .bilanz{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:16px;font-weight:700;opacity:.9}
+  .rechtliches{display:block;margin-top:10px;text-align:center;font-size:15px;color:rgba(244,247,242,.8)}
+  .ergebnis{display:flex;align-items:center;justify-content:center;gap:16px;margin:10px 0 16px;font-size:40px;font-weight:800}
+  .ergebnis .seite{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:90px;font-size:18px}
+  .ergebnis .seite svg{width:44px;height:44px}
+  .statistik{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:18px;font-weight:700}
+  .statistik td{padding:5px 4px;border-top:2px solid rgba(244,247,242,.25);text-align:center;font-variant-numeric:tabular-nums}
+  .statistik td:nth-child(2){font-weight:600;opacity:.85;font-size:16px}
+  .baum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 16px;font-size:16px;font-weight:700}
+  .baum div{background:rgba(0,0,0,.22);border-radius:8px;padding:8px;text-align:center;border:2px solid transparent}
+  .baum div.jetzt{border-color:var(--flutlicht)}
+  .baum div.durch{opacity:.7}
+  .baum small{display:block;font-size:13px;opacity:.8;font-weight:600}
+  .hinweis{font-size:16px;font-weight:600;opacity:.9;margin:0 0 14px}
+  .pokal{display:block;width:120px;height:120px;margin:0 auto 8px}
+  .nur-touch{display:none}
+  .touch .nur-touch{display:inline}
+  .touch .nur-tastatur{display:none}
+  .quer{display:none}
+  @media (max-height:520px){
+    .karte{padding:20px 22px 16px}
+    .titel svg{width:42px;height:42px}
+    .titel h1{font-size:44px}
+    .unter{margin-bottom:10px;font-size:17px}
+    .zeile{padding:5px 0;font-size:17px}
+    .wahl button{font-size:15px;padding:3px 8px}
+    .steuerung{font-size:15px;margin:10px 0 12px}
+    .knopf{font-size:22px;padding:9px 14px}
+    .anzeige{font-size:18px}
+    .anzeige .stand{font-size:20px}
+    .meldung{top:30%}
+    .karte .steuerung{display:none}
+    .karte{padding:16px 22px 12px}
+    .titel h1{font-size:40px}
+    .titel svg{width:36px;height:36px}
+    .unter{margin:2px 0 6px}
+    .knoepfe{flex-direction:row}
+    .knoepfe .knopf{flex:1}
+    .ergebnis{margin:2px 0 8px;font-size:30px;gap:12px}
+    .ergebnis .seite{font-size:16px}
+    .ergebnis .seite svg{width:30px;height:30px}
+    .statistik{font-size:15px;margin-bottom:10px}
+    .statistik td{padding:2px 4px}
+    .statistik td:nth-child(2){font-size:14px}
+    .hinweis{margin-bottom:8px}
+    .baum{margin-bottom:10px}
+    .pokal{width:70px;height:70px}
+    .bilanz{margin-top:8px}
+  }
+  @media (max-height:520px) and (min-width:640px){
+    .karte{width:min(860px,100%)}
+    .einstellungen{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,auto);grid-auto-flow:column;column-gap:24px;margin-bottom:10px}
+    .einstellungen .zeile:last-child{border-bottom:2px solid rgba(244,247,242,.3)}
+  }
+  @media (orientation:portrait) and (max-width:700px){
+    .touch .quer{display:block;margin:0 0 12px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.25);font-size:16px;font-weight:700}
+    .anzeige{font-size:17px}
+    .anzeige .team{padding:6px 7px}
+    .anzeige .stand{font-size:19px;padding:6px 8px}
+    .anzeige .uhr{min-width:50px;padding:6px 8px}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .meldung.zeigen{animation-duration:2.2s}
+    .wdh.an{animation:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="spiel" aria-label="Spielfeld"></canvas>
+
+<div class="hud" id="hud">
+  <div class="anzeige" id="anzeige" aria-live="polite">
+    <div class="team"><i class="chip" id="chipHeim"></i><span id="kurzHeim">LÖW</span></div>
+    <div class="stand"><span id="toreHeim">0</span><span>:</span><span id="toreGast">0</span></div>
+    <div class="team"><span id="kurzGast">HAI</span><i class="chip" id="chipGast"></i></div>
+    <div class="uhr"><span id="uhr">0'</span><span class="nach" id="nachspiel"></span></div>
+  </div>
+  <div class="meldung" id="meldung"><b></b><span></span></div>
+  <div class="tipp" id="tipp"></div>
+  <div class="elfer" id="elfer"></div>
+  <div class="wdh" id="wdh">WIEDERHOLUNG</div>
+  <div class="kraft" id="kraft"><i id="kraftFuell"></i></div>
+  <canvas class="radar" id="radar" width="352" height="228" aria-hidden="true"></canvas>
+</div>
+<button class="rund pausenknopf" id="pausenknopf" aria-label="Pause">
+  <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3" width="4" height="14" rx="1" fill="currentColor"/><rect x="12" y="3" width="4" height="14" rx="1" fill="currentColor"/></svg>
+</button>
+<button class="rund tonknopf" id="tonknopf" aria-label="Ton aus"></button>
+
+<div class="touch-ui" id="touchUi">
+  <div class="stickfeld" id="stickfeld"></div>
+  <div class="stick" id="stick"><div class="basis"></div><div class="knauf" id="knauf"></div></div>
+  <div class="tasten">
+    <button class="tk" data-t="schuss" aria-label="Schuss">Schuss</button>
+    <button class="tk" data-t="pass" aria-label="Pass">Pass</button>
+    <button class="tk" data-t="heber" aria-label="Heber">Heber</button>
+    <button class="tk" data-t="sprint" aria-label="Sprint">Sprint</button>
+  </div>
+</div>
+
+<div class="blende" id="blende"></div>
+
+<!-- Hauptmenü -->
+<div class="ebene" id="startEbene">
+  <div class="karte" role="dialog" aria-labelledby="startTitel">
+    <div class="titel">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" fill="#f4f7f2" stroke="#0b0f14" stroke-width="3"/><path d="M32 18l10 7.5-3.8 12H25.8L22 25.5z" fill="#0b0f14"/><path d="M32 18V5M42 25.5l12-4.5M38.2 37.5l7.3 10.5M25.8 37.5L18.5 48M22 25.5L10 21" stroke="#0b0f14" stroke-width="3" fill="none"/></svg>
+      <h1 id="startTitel">Futbolero</h1>
+    </div>
+    <p class="unter">3D-Fußball im Flutlicht</p>
+    <p class="quer">Dreh dein Handy quer – dann siehst du mehr vom Feld.</p>
+
+    <div class="einstellungen">
+    <div class="zeile"><span>Modus</span>
+      <div class="wahl" data-einst="modus">
+        <button data-wert="freund">Freundschaftsspiel</button>
+        <button data-wert="pokal">Pokal</button>
+      </div>
+    </div>
+    <div class="zeile"><span>Dein Team</span>
+      <div class="teamwahl">
+        <button class="pfeil" data-team="team" data-schritt="-1" aria-label="Voriges Team">◀</button>
+        <output id="teamAnzeige"></output>
+        <button class="pfeil" data-team="team" data-schritt="1" aria-label="Nächstes Team">▶</button>
+      </div>
+    </div>
+    <div class="zeile" id="gegnerZeile"><span>Gegner</span>
+      <div class="teamwahl">
+        <button class="pfeil" data-team="gegner" data-schritt="-1" aria-label="Voriger Gegner">◀</button>
+        <output id="gegnerAnzeige"></output>
+        <button class="pfeil" data-team="gegner" data-schritt="1" aria-label="Nächster Gegner">▶</button>
+      </div>
+    </div>
+    <div class="zeile"><span>Spieler</span>
+      <div class="wahl" data-einst="groesse">
+        <button data-wert="5">5 gegen 5</button>
+        <button data-wert="7">7 gegen 7</button>
+      </div>
+    </div>
+    <div class="zeile"><span>Stärke</span>
+      <div class="wahl" data-einst="stufe">
+        <button data-wert="leicht">Leicht</button>
+        <button data-wert="normal">Normal</button>
+        <button data-wert="schwer">Schwer</button>
+      </div>
+    </div>
+    <div class="zeile"><span>Spielzeit</span>
+      <div class="wahl" data-einst="dauer">
+        <button data-wert="2">2 Min.</button>
+        <button data-wert="4">4 Min.</button>
+        <button data-wert="6">6 Min.</button>
+      </div>
+    </div>
+    <div class="zeile"><span>Grafik</span>
+      <div class="wahl" data-einst="qualitaet">
+        <button data-wert="hoch">Schön</button>
+        <button data-wert="schnell">Schnell</button>
+      </div>
+    </div>
+    </div>
+
+    <p class="steuerung nur-tastatur">
+      <kbd>WASD</kbd>/<kbd>Pfeile</kbd> laufen · <kbd>Shift</kbd> sprinten<br>
+      <kbd>K</kbd> Pass · <kbd>J</kbd>/<kbd>Leertaste</kbd> Schuss (halten = fester) · <kbd>L</kbd> Heber<br>
+      Ohne Ball: <kbd>K</kbd>/<kbd>Q</kbd> Spieler wechseln · <kbd>J</kbd> Grätsche · <kbd>L</kbd> Doppeln · <kbd>P</kbd> Pause<br>
+      Controller geht auch: A Pass, B Schuss, X Heber, RT Sprint.
+    </p>
+    <p class="steuerung nur-touch">
+      Links wischen zum Laufen (ganz ausgelenkt = Sprint), rechts die Knöpfe: Pass, Schuss (halten = fester), Heber.
+      Ohne Ball wird Pass zu „Wechsel“ und Schuss zu „Grätsche“.
+    </p>
+
+    <div class="knoepfe">
+      <button class="knopf" id="losKnopf">Anpfiff!</button>
+    </div>
+    <div class="bilanz" id="bilanz"></div>
+    <a class="rechtliches" href="/datenschutz">Datenschutz</a>
+  </div>
+</div>
+
+<!-- Pause, Halbzeit, Ende, Pokal -->
+<div class="ebene aus" id="dialogEbene">
+  <div class="karte" role="dialog" aria-labelledby="dialogTitel">
+    <div class="titel"><h1 id="dialogTitel"></h1></div>
+    <div id="dialogInhalt"></div>
+    <div class="knoepfe" id="dialogKnoepfe"></div>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/grundlagen.js"></script>
+<script src="js/ton.js"></script>
+<script src="js/stadion.js"></script>
+<script src="js/figuren.js"></script>
+<script src="js/physik.js"></script>
+<script src="js/ki.js"></script>
+<script src="js/eingabe.js"></script>
+<script src="js/spiel.js"></script>
+<script src="js/elfmeter.js"></script>
+<script src="js/oberflaeche.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "futbolero",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Futbolero – 3D-Fußball im Flutlicht gegen den Computer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
