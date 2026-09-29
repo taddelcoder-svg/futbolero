@@ -10,8 +10,12 @@ mit Einwurf, Ecke, Abstoß, Halbzeit, Torjubel und Wiederholung.
 - **Pokal:** Viertelfinale, Halbfinale, Finale gegen immer stärkere Gegner. Bei Unentschieden gibt es
   Elfmeterschießen – als Schütze mit Fadenkreuz und Kraft, als Torwart wählst du die Ecke.
 
+- **Olympiade:** Disziplin der Swimming-Lions-Olympiade. Mit dem Ticket-Link (`?olymp=…`) spielt jeder
+  ein Spiel gegen denselben Computer-Gegner mit den Einstellungen der Disziplin (Stärke, Spielzeit,
+  Spielerzahl). Der Server prüft das Ticket und meldet `Tordifferenz × 100 + eigene Tore` als Wert.
+
 Einstellungen und Bilanz (Siege, Tore, Pokale) bleiben im Browser gespeichert (`localStorage`).
-Es gibt keine Konten und keine Online-Funktionen.
+Es gibt keine Konten.
 
 ## Steuerung
 
@@ -38,10 +42,15 @@ Dann http://localhost:10000 öffnen. Es gibt keine Abhängigkeiten außer Node �
 Das `Dockerfile` startet den Node-Server auf `$PORT` (Render: *New → Web Service*, Umgebung Docker).
 `/healthz` antwortet mit `{"ok":true}`.
 
+Für die Olympiade braucht der Dienst die Umgebungsvariable `ZUGANG_PASSWORT` – dasselbe Passwort wie
+die Olympiade, denn daraus wird der Schlüssel für die Tickets abgeleitet. `olymp.js` ist die Vorlage aus
+`olympiade/geteilt/`; bei Änderungen dort hierher kopieren.
+
 ## Aufbau
 
 ```
-server.js          liefert die Seite, den Spielcode und vendor/ aus
+server.js          liefert die Seite, den Spielcode und vendor/ aus, prüft Olympia-Tickets
+olymp.js           Olympia-Anbindung (Vorlage aus olympiade/geteilt/)
 index.html         Oberfläche und Styles
 datenschutz.html   Datenschutzerklärung
 js/
