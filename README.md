@@ -30,8 +30,9 @@ Es gibt keine Konten. Für Online-Spiele wählt man einen Spitznamen.
 ## Steuerung
 
 - **Tastatur:** Laufen mit WASD oder Pfeiltasten, Shift sprinten.
-  Mit Ball: K Pass, J oder Leertaste Schuss (halten = fester), L Heber.
-  Ohne Ball: K oder Q Spieler wechseln, J Grätsche, L Mitspieler presst mit (halten).
+  Mit Ball: Leertaste Pass, linke Maustaste Schuss (halten = fester), Alt Heber.
+  Ohne Ball: Strg links Grätsche, Leertaste oder Q Spieler wechseln, Alt Mitspieler presst mit (halten).
+  K, J und L gehen weiterhin für Pass, Schuss und Heber.
   P oder Esc Pause, M Ton.
 - **Touch:** links wischen zum Laufen (ganz ausgelenkt = Sprint), rechts Knöpfe für Schuss, Pass, Heber und Sprint.
   Ohne Ball werden daraus Grätsche, Wechsel und Doppeln.

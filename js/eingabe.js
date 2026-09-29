@@ -5,7 +5,7 @@
 function neueTaste(){ return { halten:false, neu:false, los:false, dauer:0, verbraucht:false, quellen:new Set() }; }
 const eingabe = {
   x:0, z:0, sprint:false, tipp:false,
-  tasten:{ pass:neueTaste(), schuss:neueTaste(), heber:neueTaste(), wechsel:neueTaste() },
+  tasten:{ pass:neueTaste(), schuss:neueTaste(), heber:neueTaste(), wechsel:neueTaste(), graetsche:neueTaste() },
   beiPause:null, beiTon:null, aktiv:false
 };
 
@@ -31,7 +31,8 @@ function allesLoslassen(){
 /* ---------- Tastatur ---------- */
 const tastatur = new Set();
 const TASTEN = {
-  KeyK:'pass', KeyX:'pass', KeyJ:'schuss', Space:'schuss', KeyL:'heber', KeyC:'heber', KeyQ:'wechsel', KeyE:'wechsel'
+  Space:'pass', AltLeft:'heber', AltRight:'heber', ControlLeft:'graetsche',
+  KeyK:'pass', KeyJ:'schuss', KeyL:'heber', KeyQ:'wechsel', KeyE:'wechsel'
 };
 const SPIELTASTEN = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', ...Object.keys(TASTEN)]);
 addEventListener('keydown', e => {
@@ -47,6 +48,8 @@ addEventListener('keydown', e => {
   if (TASTEN[e.code] && !e.repeat) druecken(TASTEN[e.code], 'k' + e.code);
 });
 addEventListener('keyup', e => {
+  // Alt allein würde sonst beim Loslassen das Browsermenü öffnen
+  if (eingabe.aktiv && SPIELTASTEN.has(e.code)) e.preventDefault();
   tastatur.delete(e.code);
   if (TASTEN[e.code]) loslassen(TASTEN[e.code], 'k' + e.code);
 });
@@ -115,6 +118,15 @@ function touchEinrichten(){
   document.getElementById('spiel').addEventListener('pointerdown', () => { eingabe.tipp = true; Ton.start(); });
 }
 
+/* ---------- Maus: linke Taste schießt ---------- */
+const leinwandEl = document.getElementById('spiel');
+leinwandEl.addEventListener('pointerdown', e => {
+  eingabe.tipp = true; Ton.start();
+  if (e.pointerType === 'mouse' && e.button === 0 && eingabe.aktiv){ e.preventDefault(); druecken('schuss', 'maus'); }
+});
+addEventListener('pointerup', e => { if (e.pointerType === 'mouse' && e.button === 0) loslassen('schuss', 'maus'); });
+leinwandEl.addEventListener('contextmenu', e => e.preventDefault());
+
 /* ---------- Controller ---------- */
 const pad = { knoepfe:[], start:false };
 function padAbfragen(){
@@ -165,7 +177,7 @@ function eingabeRahmenEnde(){
    Der Gastgeber führt für jeden Mitspieler so ein Objekt. Gedrückt (d) und losgelassen (u, mit
    Haltedauer) kommen einzeln an, damit auch ein kurzes Antippen nicht verloren geht. */
 function fernEingabe(){
-  return { x:0, z:0, sprint:false, tipp:false, tasten:{ pass:neueTaste(), schuss:neueTaste(), heber:neueTaste(), wechsel:neueTaste() } };
+  return { x:0, z:0, sprint:false, tipp:false, tasten:{ pass:neueTaste(), schuss:neueTaste(), heber:neueTaste(), wechsel:neueTaste(), graetsche:neueTaste() } };
 }
 function fernAnwenden(e, m){
   const zahl = v => Number.isFinite(v) ? v : 0;

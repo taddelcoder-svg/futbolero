@@ -135,7 +135,7 @@ function matchStarten({ heim, gast, modus, runde = 0 }){
   Ton.stimmungSetzen(0.35);
   if (!tippGezeigt && !istTouch){
     tippGezeigt = true;
-    tippZeigen('K Pass · J Schuss (halten) · L Heber · Shift Sprint', 7);
+    tippZeigen('Leertaste Pass · Linke Maus Schuss (halten) · Alt Heber · Strg Grätsche · Shift Sprint', 8);
   }
 }
 

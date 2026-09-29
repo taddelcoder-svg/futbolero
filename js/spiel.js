@@ -275,6 +275,8 @@ function menschAktionen(k){
   if (!p) return;
   if (t.wechsel.neu) wechseln(k);
   k.doppeln = t.heber.halten && !!ball.besitzer && ball.besitzer.team !== p.team;
+  // Grätsche hat eine eigene Taste (Strg links); ohne Ball tut es auch Schuss
+  if (t.graetsche.neu && ball.besitzer !== p){ const [dx, dz] = eingabeRichtung(p); graetsche(p, Math.atan2(dz, dx)); return; }
   if (ball.besitzer === p){
     if (t.pass.neu){ menschPass(p, 'flach'); return; }
     if (t.heber.neu){ menschPass(p, 'hoch'); return; }
