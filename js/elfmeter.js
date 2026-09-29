@@ -16,7 +16,7 @@ function elfmeterStarten(){
   spiel.elfmeter = { dran:erster, erster, ergebnisse:[[], []], nr:[0, 0], zustand:'intro', zeit:0,
     ziel:{ z:0, y:1.1 }, kraft:0, sch:null, tw:null, gewinner:-1, hechtGewaehlt:false, cpu:null, twSprung:null };
   spiel.phase = 'elfmeter'; spiel.phaseZeit = 0;
-  spiel.gesteuert = null;
+  for (const k of spiel.steuerer){ if (k.spieler) k.spieler.st = null; k.spieler = null; }
   meldung('Elfmeterschießen', `${spiel.teams[erster].daten.name} fängt an`);
   elfmeterAnzeige();
 }

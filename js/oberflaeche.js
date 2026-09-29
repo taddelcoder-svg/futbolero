@@ -57,6 +57,7 @@ function menueEinrichten(){
   $('losKnopf').addEventListener('click', () => {
     Ton.start();
     if (einstellungen.modus === 'pokal') pokalStarten();
+    else if (einstellungen.modus === 'online') onlineMenue();
     else matchStarten({ heim:einstellungen.team, gast:einstellungen.gegner, modus:'freund' });
   });
   $('pausenknopf').addEventListener('click', () => pauseUmschalten());
@@ -81,8 +82,8 @@ function menueAktualisieren(){
   const [kitA, kitB] = trikotsWaehlen(TEAMS[einstellungen.team], TEAMS[einstellungen.gegner]);
   zeigeTeam($('teamAnzeige'), TEAMS[einstellungen.team], kitA);
   zeigeTeam($('gegnerAnzeige'), TEAMS[einstellungen.gegner], kitB);
-  $('gegnerZeile').style.display = einstellungen.modus === 'pokal' ? 'none' : '';
-  $('losKnopf').textContent = einstellungen.modus === 'pokal' ? 'Pokal starten' : 'Anpfiff!';
+  $('gegnerZeile').style.display = einstellungen.modus === 'freund' ? '' : 'none';
+  $('losKnopf').textContent = { pokal:'Pokal starten', online:'Online spielen' }[einstellungen.modus] || 'Anpfiff!';
   const b = $('bilanz');
   b.textContent = '';
   const spiele = bilanz.siege + bilanz.unentschieden + bilanz.niederlagen;
@@ -100,6 +101,8 @@ function demoStarten(){
 }
 
 function zumMenue(){
+  if (online.rolle !== 'aus' || online.ws) onlineTrennen();
+  try { sessionStorage.removeItem(OLYMP_KEY); } catch (e) { /* privat */ }
   spiel.pause = false;
   pokal.aktiv = false;
   eingabe.aktiv = false;
@@ -116,12 +119,10 @@ function zumMenue(){
 
 /* ---------- Spiele starten ---------- */
 function matchStarten({ heim, gast, modus, runde = 0 }){
-  // In der Olympiade bestimmt die Disziplin Stärke, Spielzeit und Spielerzahl – für alle gleich
-  const c = modus === 'olymp' ? olympia.einst : null;
-  const basis = c ? STUFEN[c.stufe] : STUFEN[einstellungen.stufe];
-  const staerke = c ? 0 : (TEAMS[gast].staerke - 3) * 0.08;
+  const basis = STUFEN[einstellungen.stufe];
+  const staerke = (TEAMS[gast].staerke - 3) * 0.08;
   const stufe = modus === 'pokal' ? basis + runde * 0.28 + staerke : basis + staerke;
-  const groesse = c ? c.groesse : einstellungen.groesse, dauer = c ? c.dauer : einstellungen.dauer;
+  const groesse = einstellungen.groesse, dauer = einstellungen.dauer;
   $('startEbene').classList.add('aus');
   $('dialogEbene').classList.add('aus');
   if (document.activeElement) document.activeElement.blur();
@@ -187,7 +188,8 @@ function dialogSchliessen(){
 }
 
 function pauseUmschalten(){
-  if (spiel.modus === 'demo') return;
+  // Online läuft das Spiel für alle weiter
+  if (spiel.modus === 'demo' || spiel.modus === 'online') return;
   const offen = !$('dialogEbene').classList.contains('aus');
   if (spiel.pause){ spiel.pause = false; dialogSchliessen(); return; }
   if (offen || ['halbzeit', 'ende'].includes(spiel.phase)) return;
@@ -195,7 +197,7 @@ function pauseUmschalten(){
   const inhalt = el('p', 'hinweis', `${spiel.teams[0].daten.name} ${spiel.teams[0].tore} : ${spiel.teams[1].tore} ${spiel.teams[1].daten.name}`);
   dialogZeigen('Pause', inhalt, [
     { text:'Weiter', aktion:() => { spiel.pause = false; dialogSchliessen(); } },
-    ...(spiel.modus === 'olymp' ? [] : [{ text:'Aufgeben', zweit:true, aktion:zumMenue }])
+    { text:'Aufgeben', zweit:true, aktion:zumMenue }
   ]);
 }
 
@@ -264,6 +266,7 @@ function zeigeHalbzeit(){
 
 function spielEndeEntscheiden(){
   const [a, b] = spiel.teams;
+  if (spiel.modus === 'online'){ spiel.phase = 'ende'; onlineHostEnde(); return; }
   if (spiel.modus === 'pokal' && a.tore === b.tore && !spiel.elfmeter){ elfmeterStarten(); return; }
   spiel.phase = 'ende';
   zeigeEnde();
@@ -279,7 +282,6 @@ function zeigeEnde(){
     zusatz = `Im Elfmeterschießen ${E.ergebnisse[0].filter(Boolean).length} : ${E.ergebnisse[1].filter(Boolean).length}`;
   }
   const pokalsieg = spiel.modus === 'pokal' && sieger === 0 && pokal.runde === 2;
-  if (spiel.modus === 'olymp') return olympiaEnde();
   if (!spiel.gezaehlt){
     spiel.gezaehlt = true;
     if (sieger === 0) bilanz.siege++; else if (sieger === 1) bilanz.niederlagen++; else bilanz.unentschieden++;
@@ -315,127 +317,6 @@ function zeigeEnde(){
   }
   $('elfer').classList.remove('an');
   dialogZeigen(titel, inhalt, knoepfe);
-}
-
-/* ---------- Olympiade ----------
-   Mit ?olymp=… im Link kommt man als Disziplin der Olympiade hierher. Der Server prüft das Ticket,
-   gespielt wird ein Spiel gegen den Computer, das Ergebnis meldet der Server an die Olympiade. */
-const olympia = { ticket:null, info:null, einst:null, gegner:1, gemeldet:false };
-const OLYMP_KEY = 'futbolero-olymp';
-
-async function olympAnfrage(inhalt){
-  const r = await fetch('/api/olymp', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ ticket:olympia.ticket, ...inhalt }) });
-  let d = {};
-  try { d = await r.json(); } catch (e) { /* leer */ }
-  return { ok:r.ok, status:r.status, d };
-}
-
-function olympiaZurueckKnopf(){
-  const z = olympia.info && olympia.info.zurueck;
-  return /^https?:\/\//.test(z || '') ? [{ text:'Zurück zur Olympiade', aktion:() => { location.href = z; } }] : [];
-}
-
-async function olympiaPruefen(){
-  const p = new URLSearchParams(location.search);
-  let t = p.get('olymp');
-  try { if (t) sessionStorage.setItem(OLYMP_KEY, t); else t = sessionStorage.getItem(OLYMP_KEY); } catch (e) { /* privat */ }
-  if (!t) return;
-  if (p.has('olymp')) history.replaceState(null, '', location.pathname);
-  olympia.ticket = t;
-  $('startEbene').classList.add('aus');
-  let a;
-  try { a = await olympAnfrage({ art:'start' }); } catch (e) { a = { ok:false, d:{ fehler:'Der Server ist gerade nicht erreichbar. Lade die Seite gleich nochmal.' } }; }
-  if (!a.ok){
-    if (a.status === 403){ try { sessionStorage.removeItem(OLYMP_KEY); } catch (e) { /* privat */ } }
-    olympia.ticket = null;
-    dialogZeigen('Olympiade', el('p', 'hinweis', a.d.fehler || 'Das Olympia-Ticket passt nicht.'), [{ text:'Zum Menü', aktion:zumMenue }]);
-    return;
-  }
-  olympia.info = a.d;
-  olympia.gemeldet = !!a.d.gemeldet;
-  const c = a.d.einst || {};
-  olympia.einst = {
-    stufe:['leicht', 'normal', 'schwer'].includes(c.stufe) ? c.stufe : 'normal',
-    dauer:[2, 4, 6].includes(c.dauer) ? c.dauer : 2,
-    groesse:[5, 7].includes(c.groesse) ? c.groesse : 5
-  };
-  // Alle in einem Lauf spielen gegen denselben Gegner
-  let h = 0;
-  for (const z of String(a.d.lauf || '')) h = (h * 31 + z.charCodeAt(0)) >>> 0;
-  olympia.gegner = h % TEAMS.length;
-  olympiaIntro();
-}
-
-function olympiaIntro(){
-  const i = olympia.info, c = olympia.einst;
-  if (olympia.gegner === einstellungen.team) olympia.gegner = (olympia.gegner + 1) % TEAMS.length;
-  const inhalt = el('div');
-  const stufen = { leicht:'Leicht', normal:'Normal', schwer:'Schwer' };
-  inhalt.appendChild(el('p', 'hinweis', `Hallo ${i.name}! Disziplin ${i.nr || '?'} von ${i.von || '?'}: Du spielst ${c.dauer} Minuten ${c.groesse} gegen ${c.groesse} gegen die ${TEAMS[olympia.gegner].name} (Stärke ${stufen[c.stufe]}). Gewertet wird die Tordifferenz, bei Gleichstand zählen mehr eigene Tore. Du hast einen Versuch.`));
-  if (olympia.gemeldet){
-    inhalt.appendChild(el('p', 'hinweis', 'Dein Ergebnis ist schon bei der Olympiade angekommen.'));
-    return dialogZeigen(i.titel || 'Olympiade', inhalt, olympiaZurueckKnopf());
-  }
-  const wahl = el('div', 'zeile');
-  wahl.appendChild(el('span', null, 'Dein Team'));
-  const tw = el('div', 'teamwahl');
-  const zeigen = el('output');
-  const aktualisieren = () => {
-    if (einstellungen.team === olympia.gegner) einstellungen.team = (einstellungen.team + 1) % TEAMS.length;
-    zeigen.textContent = '';
-    zeigen.appendChild(trikotSvg(trikotsWaehlen(TEAMS[einstellungen.team], TEAMS[olympia.gegner])[0]));
-    zeigen.appendChild(el('span', null, TEAMS[einstellungen.team].name));
-  };
-  for (const [text, schritt] of [['◀', -1], ['▶', 1]]){
-    const b = el('button', 'pfeil', text);
-    b.setAttribute('aria-label', schritt < 0 ? 'Voriges Team' : 'Nächstes Team');
-    b.addEventListener('click', () => {
-      Ton.start(); Ton.klick();
-      do { einstellungen.team = (einstellungen.team + schritt + TEAMS.length) % TEAMS.length; } while (einstellungen.team === olympia.gegner);
-      speichern(); aktualisieren();
-    });
-    if (schritt < 0) tw.appendChild(b); else { tw.appendChild(zeigen); tw.appendChild(b); }
-  }
-  aktualisieren();
-  wahl.appendChild(tw);
-  inhalt.appendChild(wahl);
-  dialogZeigen(i.titel || 'Olympiade', inhalt, [
-    { text:'Anpfiff!', aktion:() => matchStarten({ heim:einstellungen.team, gast:olympia.gegner, modus:'olymp' }) }
-  ]);
-}
-
-function olympiaEnde(){
-  const [a, b] = spiel.teams;
-  const inhalt = el('div');
-  inhalt.appendChild(ergebnisBlock());
-  const status = el('p', 'hinweis', 'Ergebnis wird an die Olympiade gemeldet …');
-  inhalt.appendChild(status);
-  inhalt.appendChild(statistikTabelle());
-  const titel = a.tore > b.tore ? 'Sieg!' : b.tore > a.tore ? 'Niederlage' : 'Unentschieden';
-  $('elfer').classList.remove('an');
-  if (a.tore > b.tore){ Fans.jubelTeam = 0; Fans.jubelZeit = 6; Ton.jubel(0.9); }
-  const melden = async () => {
-    status.textContent = 'Ergebnis wird an die Olympiade gemeldet …';
-    let erg = null;
-    for (let i = 0; i < 3 && !erg; i++){
-      try {
-        const r = await olympAnfrage({ art:'ergebnis', tore:a.tore, gegentore:b.tore });
-        if (r.ok || r.status === 409) erg = 'ok';
-        else if (r.status === 403) erg = 'ticket';
-      } catch (e) { /* gleich nochmal */ }
-      if (!erg) await new Promise(ok => setTimeout(ok, 2000));
-    }
-    if (erg === 'ok'){
-      olympia.gemeldet = true;
-      status.textContent = `Gemeldet: ${a.tore}:${b.tore}. Zurück zur Olympiade für die Wertung.`;
-      dialogZeigen(titel, inhalt, olympiaZurueckKnopf());
-    } else {
-      status.textContent = erg === 'ticket' ? 'Das Olympia-Ticket ist abgelaufen – das Ergebnis konnte nicht gemeldet werden.' : 'Die Olympiade war nicht erreichbar.';
-      dialogZeigen(titel, inhalt, [...(erg === 'ticket' ? [] : [{ text:'Nochmal melden', aktion:melden }]), ...olympiaZurueckKnopf()]);
-    }
-  };
-  dialogZeigen(titel, inhalt, []);
-  melden();
 }
 
 /* ---------- HUD ---------- */
@@ -600,12 +481,19 @@ function markierungenZeigen(zeit, dt){
 function rahmen(dt){
   spiel.phaseZeit += dt;
   const ph = spiel.phase;
-  if (ph === 'spiel'){ if (spiel.teams[0] && spiel.teams[0].mensch) menschAktionen(); }
+  if (ph === 'spiel'){ for (const k of spiel.steuerer) if (k.spieler) menschAktionen(k); }
   else if (ph === 'warten') standardWarten(dt);
   else if (ph === 'aus'){ if (spiel.phaseZeit > 1.1) umblenden(() => standardAufstellen(spiel.naechster)); }
-  else if (ph === 'tor'){ if (spiel.phaseZeit > 3.3){ if (spiel.modus === 'demo') anstossNachTor(); else wiederholungStarten(); } }
+  else if (ph === 'tor'){ if (spiel.phaseZeit > 3.3){ if (spiel.modus === 'demo' || spiel.modus === 'online') anstossNachTor(); else wiederholungStarten(); } }
   else if (ph === 'wiederholung') wiederholungSchritt(dt);
-  else if (ph === 'pause-halbzeit'){ if (spiel.phaseZeit > 2.2){ spiel.phase = 'halbzeit'; zeigeHalbzeit(); } }
+  else if (ph === 'pause-halbzeit'){
+    if (spiel.phaseZeit > 2.2){
+      // Online wartet niemand auf einen Knopf: nach kurzer Pause geht es weiter
+      if (spiel.modus === 'online'){ spiel.phase = 'halbzeit-online'; spiel.phaseZeit = 0; meldung('Halbzeit', 'Gleich geht es weiter'); }
+      else { spiel.phase = 'halbzeit'; zeigeHalbzeit(); }
+    }
+  }
+  else if (ph === 'halbzeit-online'){ if (spiel.phaseZeit > 4) zweiteHalbzeit(); }
   else if (ph === 'abpfiff'){ if (spiel.phaseZeit > 2.4) spielEndeEntscheiden(); }
   else if (ph === 'elfmeter') elfmeterRahmen(dt);
 }
@@ -613,20 +501,35 @@ function rahmen(dt){
 let letzte = performance.now(), akku = 0;
 function schleife(jetzt){
   requestAnimationFrame(schleife);
-  const dt = clamp((jetzt - letzte) / 1000, 0, 0.1);
+  takt(jetzt, true);
+}
+// Ein Bild: Eingaben, Spiellogik (außer bei Online-Gästen, die nur anzeigen), Darstellung
+function takt(jetzt, zeichnen){
+  // Ein Gastgeber im Hintergrund-Tab bekommt selten Takte – dann größere Schritte nachholen
+  const dt = clamp((jetzt - letzte) / 1000, 0, zeichnen ? 0.1 : 1);
   letzte = jetzt;
   eingabeRahmen(dt);
-  if (!spiel.pause){
+  for (const k of spiel.steuerer) if (k.e !== eingabe) fernRahmen(k.e, dt);
+  if (online.rolle === 'gast') onlineGastTakt(dt);
+  else if (!spiel.pause){
     rahmen(dt);
     akku += dt;
     let n = 0;
-    while (akku >= SCHRITT && n < 14){ simSchritt(SCHRITT); akku -= SCHRITT; n++; }
-    if (n >= 14) akku = 0;
+    const max = zeichnen ? 14 : 130;
+    while (akku >= SCHRITT && n < max){ simSchritt(SCHRITT); akku -= SCHRITT; n++; }
+    if (n >= max) akku = 0;
+    if (online.rolle === 'host') onlineHostTakt(dt);
   }
-  darstellen(spiel.pause ? 0 : dt);
-  renderer.render(szene, kamera);
+  if (zeichnen){
+    darstellen(spiel.pause ? 0 : dt);
+    schilderZeigen();
+    renderer.render(szene, kamera);
+  }
   eingabeRahmenEnde();
+  for (const k of spiel.steuerer) if (k.e !== eingabe) fernRahmenEnde(k.e);
 }
+// Online darf das Spiel nicht stehen bleiben, wenn der Gastgeber den Tab wechselt
+setInterval(() => { if (document.hidden && online.rolle === 'host') takt(performance.now(), false); }, 100);
 
 async function starten(){
   try {
@@ -639,6 +542,7 @@ async function starten(){
   spiel.markierung = markierungenBauen();
   if (istTouch) touchEinrichten();
   menueEinrichten();
+  effekteMitschneiden();
   demoStarten();
   requestAnimationFrame(schleife);
   olympiaPruefen();

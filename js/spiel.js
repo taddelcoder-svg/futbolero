@@ -6,11 +6,57 @@ const spiel = {
   phase:'start',        // start, warten, spiel, aus, tor, wiederholung, pause-halbzeit, abpfiff, halbzeit, ende, elfmeter
   modus:'demo', optionen:null,
   zeit:0, phaseZeit:0, uhr:0, halbzeit:1, halbDauer:120, nachspiel:0,
-  teams:[], alle:[], gesteuert:null, standard:null, naechster:null,
+  teams:[], alle:[], steuerer:[], ich:null, standard:null, naechster:null,
   anstossTeam:0, ersterAnstoss:0, kiTakt:0, doppeln:false, ladung:0,
   torschuetze:null, torTeam:null, torSeite:0, torFrame:0, blende:false, pause:false,
   markierung:null
 };
+// Der Spieler, den dieses Gerät gerade steuert
+Object.defineProperty(spiel, 'gesteuert', { get(){ return spiel.ich ? spiel.ich.spieler : null; } });
+
+/* ---------- Steuerer ----------
+   Jeder Mensch – am eigenen Gerät oder übers Netz – ist ein Steuerer mit eigener Eingabe (e) und
+   steuert einen Feldspieler seines Teams (spieler). Am Spieler zeigt p.st auf seinen Steuerer. */
+function steuererAnlegen(liste, ich){
+  spiel.steuerer = liste.map(m => ({ id:m.id, name:m.name || '', team:spiel.teams[m.team], e:m.id === ich ? eingabe : fernEingabe(),
+    spieler:null, tore:0, doppeln:false }));
+  spiel.ich = spiel.steuerer.find(k => k.id === ich) || null;
+  for (const t of spiel.teams) t.mensch = spiel.steuerer.some(k => k.team === t);
+}
+
+// Nach einem Standard: Ausführender und alle anderen Menschen bekommen einen Spieler
+function steuererVerteilen(standardTeam, schuetze){
+  for (const p of spiel.alle) p.st = null;
+  const vergeben = new Set();
+  if (schuetze && schuetze.rolle !== 'TW'){
+    const k = spiel.steuerer.find(x => x.spieler === schuetze) || spiel.steuerer.find(x => x.team === standardTeam);
+    if (k){ k.spieler = schuetze; schuetze.st = k; vergeben.add(k); }
+  }
+  const rang = { ST:0, MI:1, AB:2, TW:9 };
+  for (const k of spiel.steuerer){
+    if (vergeben.has(k)) continue;
+    let p = k.spieler && k.spieler.team === k.team && k.spieler.rolle !== 'TW' && !k.spieler.st ? k.spieler : null;
+    if (!p) p = k.team.spieler.filter(q => q.rolle !== 'TW' && !q.st).sort((a, b) => rang[a.rolle] - rang[b.rolle])[0] || null;
+    k.spieler = p;
+    if (p) p.st = k;
+  }
+}
+
+// Ein Spieler ohne Steuerer kommt an den Ball: ein Mensch seines Teams übernimmt ihn.
+// Bevorzugt der, der ihm den Ball zugespielt hat, sonst der, dessen Spieler am weitesten weg ist.
+function uebernehmen(p, von){
+  if (!p || p.st || p.rolle === 'TW' || !p.team.mensch) return;
+  let k = von && von.st && von.team === p.team ? von.st : null;
+  if (!k){
+    let weit = -1;
+    for (const x of spiel.steuerer){
+      if (x.team !== p.team) continue;
+      const d = x.spieler ? abstand(x.spieler, p) : 1e9;
+      if (d > weit){ weit = d; k = x; }
+    }
+  }
+  if (k) wechseln(k, p);
+}
 
 /* ---------- Mannschaften ---------- */
 function teamBauen(idx, daten, kit, groesse, mensch, stufe){
@@ -40,20 +86,23 @@ function teamBauen(idx, daten, kit, groesse, mensch, stufe){
 
 function spielAufraeumen(){
   for (const p of spiel.alle) szene.remove(p.figur.wurzel);
-  spiel.alle = []; spiel.teams = [];
+  spiel.alle = []; spiel.teams = []; spiel.steuerer = []; spiel.ich = null;
 }
 
 function spielStarten(opt){
   spielAufraeumen();
   const A = TEAMS[opt.heim], B = TEAMS[opt.gast];
   const kits = trikotsWaehlen(A, B);
-  const mensch = opt.modus !== 'demo';
-  spiel.teams = [teamBauen(0, A, kits[0], opt.groesse, mensch, 1), teamBauen(1, B, kits[1], opt.groesse, false, opt.stufe)];
+  // Online spielen Menschen gegeneinander: beide Teams bekommen dieselbe KI-Stärke
+  const online = opt.modus === 'online';
+  const mensch = opt.modus !== 'demo' && !online;
+  spiel.teams = [teamBauen(0, A, kits[0], opt.groesse, mensch, online ? opt.stufe : 1), teamBauen(1, B, kits[1], opt.groesse, false, opt.stufe)];
   spiel.alle = [...spiel.teams[0].spieler, ...spiel.teams[1].spieler];
+  steuererAnlegen(opt.menschen || (mensch ? [{ id:'ich', team:0 }] : []), opt.ich || 'ich');
   fansEinkleiden(kits[0], kits[1]);
   Object.assign(spiel, {
     modus:opt.modus, optionen:opt, halbzeit:1, uhr:0, nachspiel:0, halbDauer:opt.dauer * 30,
-    gesteuert:null, standard:null, naechster:null, elfmeter:null, pause:false, zeit:0, ladung:0, doppeln:false
+    standard:null, naechster:null, elfmeter:null, pause:false, zeit:0, ladung:0
   });
   aufnahmeStart();
   spiel.ersterAnstoss = spiel.anstossTeam = zufallGanz(2);
@@ -62,15 +111,16 @@ function spielStarten(opt){
 }
 
 /* ---------- Steuerung wechseln ---------- */
-function wechseln(ziel){
-  const team = spiel.teams[0];
-  if (!team || !team.mensch) return;
+function wechseln(k, ziel){
+  if (!k) return;
+  const team = k.team;
+  const frei = p => p.rolle !== 'TW' && (!p.st || p.st === k);
   if (!ziel){
-    // Der Spieler, der am schnellsten am Ball ist (Torwart ausgenommen)
+    // Der Spieler, der am schnellsten am Ball ist (Torwart und Spieler anderer Menschen ausgenommen)
     const bx = ball.x + ball.vx * 0.35, bz = ball.z + ball.vz * 0.35;
     let bester = null, bestD = 1e9;
     for (const p of team.spieler){
-      if (p.rolle === 'TW' || p === spiel.gesteuert) continue;
+      if (!frei(p) || p === k.spieler) continue;
       let d = Math.hypot(p.x - bx, p.z - bz);
       // Spieler, die zwischen Ball und eigenem Tor stehen, sind beim Verteidigen wertvoller
       if ((p.x - bx) * team.seite < 0) d -= 2;
@@ -78,9 +128,9 @@ function wechseln(ziel){
     }
     ziel = bester;
   }
-  if (ziel && ziel !== spiel.gesteuert && ziel.rolle !== 'TW'){
-    if (spiel.gesteuert){ spiel.gesteuert.puffer = null; spiel.gesteuert.wx = spiel.gesteuert.wz = 0; }
-    spiel.gesteuert = ziel;
+  if (ziel && ziel !== k.spieler && frei(ziel)){
+    if (k.spieler){ k.spieler.st = null; k.spieler.puffer = null; k.spieler.wx = k.spieler.wz = 0; }
+    k.spieler = ziel; ziel.st = k;
   }
 }
 
@@ -93,6 +143,7 @@ function ballSpielen(p, vx, vy, vz, art, lautst = 0.6){
   ball.vx = vx; ball.vy = vy; ball.vz = vz;
   ball.zuletzt = p; ball.art = art; ball.gespieltZeit = spiel.zeit;
   ball.passZiel = null; ball.schussVon = null;
+  ball.stVon = p.st || null; ball.stSpieler = p;   // wer von den Menschen zuletzt geschossen hat
   p.sperre = 0.3; p.schussT = 1; p.puffer = null;
   spiel.ladung = 0;
   Ton.schuss(lautst);
@@ -122,7 +173,7 @@ function passSpielen(p, m, art, fehler = 0.05){
   const vEnde = 7;
   const y0 = p.einwurf ? 2.1 : p.halten ? 1.05 : ball.y;
   let tx = m.x, tz = m.z, v = 10, winkel = 0;
-  const vorhalt = m === spiel.gesteuert ? 0.35 : 0.8;
+  const vorhalt = m.st ? 0.35 : 0.8;
   for (let i = 0; i < 3; i++){
     const d = Math.hypot(tx - ball.x, tz - ball.z);
     let t;
@@ -141,7 +192,7 @@ function passSpielen(p, m, art, fehler = 0.05){
   ball.passZiel = m;
   p.team.stat.paesse++;
   m.letzterPassVon = p;
-  if (p.team.mensch && m.rolle !== 'TW') wechseln(m);
+  uebernehmen(m, p);
 }
 
 function passInDenRaum(p, dx, dz, art){
@@ -158,11 +209,11 @@ function passInDenRaum(p, dx, dz, art){
   if (p.team.mensch){
     let bester = null, bestD = 1e9;
     for (const m of p.team.spieler){
-      if (m === p || m.rolle === 'TW') continue;
+      if (m === p || m.rolle === 'TW' || (m.st && m.st !== p.st)) continue;
       const dd = Math.hypot(m.x - tx, m.z - tz);
       if (dd < bestD){ bestD = dd; bester = m; }
     }
-    if (bester && bestD < 14) wechseln(bester);
+    if (bester && bestD < 14){ if (p.st) wechseln(p.st, bester); else uebernehmen(bester); }
   }
 }
 
@@ -193,8 +244,9 @@ function passZielWaehlen(p, dx, dz, nurImStrafraum){
 
 /* ---------- Mensch am Ball ---------- */
 function eingabeRichtung(p){
-  const m = Math.hypot(eingabe.x, eingabe.z);
-  if (m > 0.2) return [eingabe.x / m, eingabe.z / m];
+  const e = p.st ? p.st.e : null;
+  const m = e ? Math.hypot(e.x, e.z) : 0;
+  if (m > 0.2) return [e.x / m, e.z / m];
   return [Math.cos(p.dir), Math.sin(p.dir)];
 }
 
@@ -206,28 +258,28 @@ function menschPass(p, art){
 }
 
 function menschSchuss(p, kraft, direkt){
-  const m = Math.hypot(eingabe.x, eingabe.z);
+  const e = p.st ? p.st.e : eingabe;
+  const m = Math.hypot(e.x, e.z);
   let zielZ;
-  const quer = m > 0.25 ? eingabe.z / Math.max(m, 0.6) : 0;
+  const quer = m > 0.25 ? e.z / Math.max(m, 0.6) : 0;
   if (Math.abs(quer) > 0.2) zielZ = clamp(quer, -1, 1) * (TOR.B / 2 - 0.45);
   else zielZ = -Math.sign(p.z || zufall(-1, 1)) * 1.3;
   let fehler = 0.8;
-  if (eingabe.sprint) fehler *= 1.15;
+  if (e.sprint) fehler *= 1.15;
   if (direkt) fehler *= 1.2;
   schiessen(p, kraft, zielZ, fehler);
 }
 
-function menschAktionen(){
-  const p = spiel.gesteuert;
-  const t = eingabe.tasten;
+function menschAktionen(k){
+  const p = k.spieler, t = k.e.tasten, ich = k === spiel.ich;
   if (!p) return;
-  if (t.wechsel.neu) wechseln();
-  spiel.doppeln = t.heber.halten && !!ball.besitzer && ball.besitzer.team !== p.team;
+  if (t.wechsel.neu) wechseln(k);
+  k.doppeln = t.heber.halten && !!ball.besitzer && ball.besitzer.team !== p.team;
   if (ball.besitzer === p){
     if (t.pass.neu){ menschPass(p, 'flach'); return; }
     if (t.heber.neu){ menschPass(p, 'hoch'); return; }
     if (t.schuss.halten && !t.schuss.verbraucht){
-      spiel.ladung = Math.min(1, t.schuss.dauer / 0.85);
+      if (ich) spiel.ladung = Math.min(1, t.schuss.dauer / 0.85);
       if (t.schuss.dauer > 1.05){ t.schuss.verbraucht = true; menschSchuss(p, 1); }
     } else if (t.schuss.los && !t.schuss.verbraucht){
       t.schuss.verbraucht = true;
@@ -235,7 +287,7 @@ function menschAktionen(){
     }
     return;
   }
-  spiel.ladung = 0;
+  if (ich) spiel.ladung = 0;
   const frei = !ball.besitzer;
   if (frei && (abstand(p, ball) < 7 || ball.passZiel === p)){
     // Direktabnahme vormerken – bei einem Pass zu mir gilt sie, bis der Ball ankommt
@@ -245,18 +297,18 @@ function menschAktionen(){
     if (t.heber.neu) p.puffer = { art:'heber', bis };
     if (p.puffer && p.puffer.art === 'schuss' && t.schuss.halten){
       p.puffer.bis = Math.max(p.puffer.bis, spiel.zeit + 0.3);
-      spiel.ladung = Math.min(1, t.schuss.dauer / 0.85);
+      if (ich) spiel.ladung = Math.min(1, t.schuss.dauer / 0.85);
     }
   } else if (ball.besitzer && ball.besitzer.team !== p.team){
     if (t.schuss.neu){ const [dx, dz] = eingabeRichtung(p); graetsche(p, Math.atan2(dz, dx)); }
-    if (t.pass.neu) wechseln();
-  } else if (t.pass.neu) wechseln();
+    if (t.pass.neu) wechseln(k);
+  } else if (t.pass.neu) wechseln(k);
 }
 
 function pufferAusfuehren(p){
   const art = p.puffer.art;
   p.puffer = null;
-  const t = eingabe.tasten.schuss;
+  const t = p.st.e.tasten.schuss;
   if (art === 'schuss'){
     const kraft = t.halten ? Math.max(0.35, Math.min(1, t.dauer / 0.85)) : Math.max(0.45, Math.min(1, t.dauer / 0.85));
     t.verbraucht = true;
@@ -264,16 +316,17 @@ function pufferAusfuehren(p){
   } else menschPass(p, art === 'heber' ? 'hoch' : 'flach');
 }
 
-function menschBewegung(p){
-  const mx = eingabe.x, mz = eingabe.z, m = Math.hypot(mx, mz);
+function menschBewegung(k){
+  const p = k.spieler, e = k.e;
+  const mx = e.x, mz = e.z, m = Math.hypot(mx, mz);
   if (m < 0.12){
     // Ein Pass kommt: selbstständig entgegenlaufen
     if (ball.passZiel === p && !ball.besitzer && p.abfang){ laufeZu(p, p.abfang.x, p.abfang.z, TEMPO.lauf, abstand(p, ball) < 3 ? 2 : 0); return; }
     p.wx = 0; p.wz = 0; return;
   }
-  const v = (eingabe.sprint ? TEMPO.sprint : TEMPO.lauf) * (ball.besitzer === p ? 0.93 : 1);
-  const k = Math.min(1, m) / m;
-  p.wx = mx * k * v; p.wz = mz * k * v;
+  const v = (e.sprint ? TEMPO.sprint : TEMPO.lauf) * (ball.besitzer === p ? 0.93 : 1);
+  const f = Math.min(1, m) / m;
+  p.wx = mx * f * v; p.wz = mz * f * v;
 }
 
 /* ---------- Grätsche ---------- */
@@ -340,8 +393,8 @@ function annehmen(p){
   p.bekommenZeit = spiel.zeit;
   p.denk = Math.min(p.denk, zufall(0.08, 0.22));
   p.beruehrung = 0;
-  if (p.team.mensch && p.rolle !== 'TW' && spiel.gesteuert !== p) wechseln(p);
-  if (p.puffer && p.puffer.bis > spiel.zeit && p === spiel.gesteuert) pufferAusfuehren(p);
+  uebernehmen(p, vorher);
+  if (p.puffer && p.puffer.bis > spiel.zeit && p.st) pufferAusfuehren(p);
   else p.puffer = null;
 }
 
@@ -351,7 +404,7 @@ function kopfball(p){
   const dTor = Math.hypot(torX - p.x, p.z);
   let absicht;
   const fuerMich = ball.passZiel === p && ball.y < 2.2;
-  if (p === spiel.gesteuert) absicht = p.puffer && p.puffer.bis > spiel.zeit ? p.puffer.art : ball.y < 1.5 || fuerMich ? 'brust' : 'abpraller';
+  if (p.st) absicht = p.puffer && p.puffer.bis > spiel.zeit ? p.puffer.art : ball.y < 1.5 || fuerMich ? 'brust' : 'abpraller';
   else if (dTor < 16) absicht = 'schuss';
   else if (fuerMich) absicht = 'brust';
   else if (Math.abs(p.x - eigenesTorX(p.team)) < 22) absicht = 'klaeren';
@@ -365,7 +418,7 @@ function kopfball(p){
     const d = Math.hypot(torX - ball.x, zz - ball.z);
     const w = schussWinkel(v, d, zufall(0.3, 1.8), ball.y);
     const vec = schussVektor(torX - ball.x, zz - ball.z, v, w);
-    const fehler = (p === spiel.gesteuert ? 0.1 : 0.14) * p.team.kiProfil.schussFehler;
+    const fehler = (p.st ? 0.1 : 0.14) * p.team.kiProfil.schussFehler;
     const r = gauss() * fehler;
     const c = Math.cos(r), sn = Math.sin(r);
     ballSpielen(p, vec.vx * c - vec.vz * sn, vec.vy, vec.vx * sn + vec.vz * c, 'schuss', 0.45);
@@ -374,7 +427,7 @@ function kopfball(p){
     return;
   }
   if (absicht === 'pass' || absicht === 'heber'){
-    const [dx, dz] = p === spiel.gesteuert ? eingabeRichtung(p) : [s, 0];
+    const [dx, dz] = p.st ? eingabeRichtung(p) : [s, 0];
     const m = passZielWaehlen(p, dx, dz);
     if (m){ passSpielen(p, m, 'flach', 0.08); return; }
   }
@@ -397,11 +450,11 @@ function zweikaempfe(dt){
     if (q.betaeubt > 0 || q.sperre > 0 || q.graetsche > 0 || q.fallT > 0 || q.hecht > 0) continue;
     const dBall = Math.hypot(q.x - ball.x, q.z - ball.z);
     if (dBall > 0.9) continue;
-    let rate = q === spiel.gesteuert ? 2.6 : q.team.kiProfil.klau;
+    let rate = q.st ? 2.6 : q.team.kiProfil.klau;
     const zuBall = Math.atan2(ball.z - q.z, ball.x - q.x);
     rate *= Math.cos(winkelDiff(q.dir, zuBall)) > 0.3 ? 1 : 0.45;
     rate *= 1 + Math.hypot(c.vx, c.vz) / 14;
-    if (c === spiel.gesteuert) rate *= [0.6, 0.85, 1.05][Math.round(clamp(stufe, 0, 2))];
+    if (c.st && !q.st) rate *= [0.6, 0.85, 1.05][Math.round(clamp(stufe, 0, 2))];
     if (Math.random() < rate * dt){ eroberung(q, c); return; }
   }
 }
@@ -411,7 +464,7 @@ function eroberung(q, c){
   ball.zuletzt = q; ball.passZiel = null; ball.art = null;
   if (Math.random() < 0.55){
     ball.besitzer = q; q.bekommenZeit = spiel.zeit; q.denk = zufall(0.1, 0.3);
-    if (q.team.mensch && q.rolle !== 'TW') wechseln(q);
+    uebernehmen(q);
   } else {
     ball.besitzer = null;
     const r = q.dir + zufall(-0.8, 0.8), v = zufall(3.5, 6);
@@ -490,7 +543,7 @@ function spielerBewegen(p, dt){
   const sp = Math.hypot(p.vx, p.vz);
   let zielDir = null;
   if (p.blickFest != null) zielDir = p.blickFest;
-  else if (p === spiel.gesteuert && spiel.phase === 'spiel' && Math.hypot(eingabe.x, eingabe.z) > 0.2) zielDir = Math.atan2(eingabe.z, eingabe.x);
+  else if (p.st && spiel.phase === 'spiel' && Math.hypot(p.st.e.x, p.st.e.z) > 0.2) zielDir = Math.atan2(p.st.e.z, p.st.e.x);
   else if (sp > 0.8) zielDir = Math.atan2(p.vz, p.vx);
   else if (p.blick != null) zielDir = p.blick;
   if (zielDir != null){
@@ -520,7 +573,7 @@ function kiSchritt(dt){
     spiel.kiTakt -= dt;
     if (spiel.kiTakt <= 0){ spiel.kiTakt = 0.1; for (const t of spiel.teams) taktik(t); }
     for (const p of spiel.alle){
-      if (p === spiel.gesteuert) continue;
+      if (p.st) continue;
       if (p.rolle === 'TW') kiTorwart(p, dt); else kiFeldspieler(p, dt);
     }
     return;
@@ -574,7 +627,7 @@ function simSchritt(dt){
   if (!['spiel', 'warten', 'aus', 'tor', 'pause-halbzeit', 'abpfiff'].includes(ph)) return;
   if (ph === 'spiel'){
     spiel.uhr += dt;
-    if (spiel.gesteuert) menschBewegung(spiel.gesteuert);
+    for (const k of spiel.steuerer) if (k.spieler) menschBewegung(k);
   }
   kiSchritt(dt);
   for (const p of spiel.alle) spielerBewegen(p, dt);
@@ -651,7 +704,8 @@ function torGefallen(s){
   ball.besitzer = null;
   Welt.netzWackeln[s] = 1.2;
   Ton.netz();
-  Ton.jubel(team.mensch || spiel.modus === 'demo' ? 1 : 0.7);
+  Ton.jubel(!spiel.ich || spiel.ich.team === team ? 1 : 0.7);
+  if (!eigentor && letzter && letzter === ball.stSpieler && ball.stVon && ball.stVon.team === team) ball.stVon.tore++;
   Fans.jubelTeam = team.idx; Fans.jubelZeit = 5;
   const unter = eigentor ? 'Eigentor' : `${team.daten.name} · Nr. ${held.nummer}`;
   meldung('TOR!', unter, 'tor');
@@ -786,9 +840,7 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
   spiel.standard = { art, team, schuetze, zeit:0 };
   spiel.phase = 'warten'; spiel.phaseZeit = 0;
   if (schuetze.einwurf) dribbeln(0.016);
-  if (team.mensch && schuetze.rolle !== 'TW') spiel.gesteuert = schuetze;
-  else if (spiel.teams[0].mensch && (!spiel.gesteuert || spiel.gesteuert.rolle === 'TW')) spiel.gesteuert = feld(spiel.teams[0]).find(p => p.rolle === 'ST') || feld(spiel.teams[0])[0];
-  if (spiel.gesteuert && !spiel.teams[0].mensch) spiel.gesteuert = null;
+  steuererVerteilen(team, schuetze);
   if (art === 'anstoss') meldung('Anstoß', team.daten.name);
   kam.schnitt = true;
 }
@@ -799,16 +851,16 @@ function standardWarten(dt){
   if (!st || spiel.blende) return;
   st.zeit += dt;
   const p = st.schuetze;
-  const mensch = p === spiel.gesteuert;
-  if (mensch){
+  if (p.st){
     // Zielen: der Ausführende dreht sich in Eingaberichtung
-    const m = Math.hypot(eingabe.x, eingabe.z);
+    const e = p.st.e;
+    const m = Math.hypot(e.x, e.z);
     if (m > 0.2){
-      let r = Math.atan2(eingabe.z, eingabe.x);
+      let r = Math.atan2(e.z, e.x);
       if (st.art === 'einwurf'){ const innen = -Math.sign(p.z) * Math.PI / 2; r = innen + clamp(winkelDiff(innen, r), -1.3, 1.3); }
       p.blickFest = r;
     }
-    const t = eingabe.tasten;
+    const t = e.tasten;
     const aktion = t.pass.neu ? 'pass' : t.heber.neu ? 'heber' : t.schuss.neu ? 'schuss' : null;
     if (aktion) return standardAusfuehren(aktion);
     if (st.zeit > 8) return standardAusfuehren('auto');
@@ -819,7 +871,7 @@ function standardWarten(dt){
 
 function standardAusfuehren(aktion){
   const st = spiel.standard, p = st.schuetze, team = p.team;
-  const mensch = p === spiel.gesteuert && aktion !== 'auto';
+  const mensch = !!p.st && aktion !== 'auto';
   const [rx, rz] = mensch ? eingabeRichtung(p) : [team.seite, 0];
   spiel.standard = null;
   spiel.phase = 'spiel'; spiel.phaseZeit = 0;

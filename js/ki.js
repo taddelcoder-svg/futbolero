@@ -34,7 +34,7 @@ function taktik(team){
   const wirHaben = !!b && b.team === team;
   const sieHaben = !!b && b.team !== team;
   const feld = team.spieler.filter(p => p.rolle !== 'TW');
-  const mensch = team.mensch ? spiel.gesteuert : null;
+  const menschen = team.spieler.filter(p => p.st);
   for (const p of team.spieler){ p.auftrag = 'position'; p.markiert = null; }
 
   if (!b){
@@ -50,27 +50,27 @@ function taktik(team){
     // Ein Pass für uns: der Empfänger geht hin, außer ein anderer ist klar schneller
     const z = ball.passZiel;
     if (z && z.team === team && (!bester || z.abfang.t < bester.abfang.t + 0.5)) bester = z;
+    if (bester && !bester.st && menschen.length){
+      // Der schnellste Mensch des Teams: holt er den Ball selbst, oder wechselt er?
+      const g = menschen.reduce((a, c) => (c.abfang.t < a.abfang.t ? c : a));
+      if (bester.rolle !== 'TW' && g.abfang.t > bester.abfang.t + 0.9 && abstand(g, ball) > 7 && spiel.phase === 'spiel'){ wechseln(g.st, bester); bester = null; }
+      else if (bester.rolle !== 'TW' && g.abfang.t < bester.abfang.t + 0.6) bester = null;
+    }
+    if (bester && !bester.st) bester.auftrag = 'ball';
+    // Um einen umkämpften Ball kümmert sich zur Not ein Zweiter
     if (bester){
-      if (mensch && bester !== mensch){
-        const g = mensch.abfang || abfangen(mensch, punkte);
-        if (bester.rolle !== 'TW' && g.t > bester.abfang.t + 0.9 && abstand(mensch, ball) > 7 && spiel.phase === 'spiel') wechseln(bester);
-        else if (bester.rolle !== 'TW' && g.t < bester.abfang.t + 0.6) bester = null;
-      }
-      if (bester && bester !== mensch) bester.auftrag = 'ball';
-      // Um einen umkämpften Ball kümmert sich zur Not ein Zweiter
-      if (bester){
-        const zweiter = feld.filter(p => p !== bester && p !== mensch).sort((a, c) => a.abfang.t - c.abfang.t)[0];
-        const gegT = Math.min(...geg.spieler.map(o => abfangen(o, punkte, 0.1).t));
-        if (zweiter && zweiter.abfang.t < gegT + 0.3 && zweiter.abfang.t < bester.abfang.t + 0.7 && abstand(zweiter, ball) < 12) zweiter.auftrag = 'ball';
-      }
+      const zweiter = feld.filter(p => p !== bester && !p.st).sort((a, c) => a.abfang.t - c.abfang.t)[0];
+      const gegT = Math.min(...geg.spieler.map(o => abfangen(o, punkte, 0.1).t));
+      if (zweiter && zweiter.abfang.t < gegT + 0.3 && zweiter.abfang.t < bester.abfang.t + 0.7 && abstand(zweiter, ball) < 12) zweiter.auftrag = 'ball';
     }
   } else if (wirHaben){
-    if (b !== mensch) b.auftrag = 'fuehren';
+    if (!b.st) b.auftrag = 'fuehren';
   } else if (sieHaben && !b.halten && spiel.phase === 'spiel'){
-    const nachAbstand = feld.filter(p => p !== mensch).sort((a, c) => abstand(a, b) - abstand(c, b));
+    const nachAbstand = feld.filter(p => !p.st).sort((a, c) => abstand(a, b) - abstand(c, b));
     const erster = nachAbstand[0], zweiter = nachAbstand[1];
-    const menschNah = mensch && abstand(mensch, b) < 6.5;
-    if (erster && (!mensch || !menschNah || spiel.doppeln)) erster.auftrag = 'pressen';
+    const menschNah = menschen.some(p => abstand(p, b) < 6.5);
+    const doppeln = menschen.some(p => p.st.doppeln);
+    if (erster && (!menschNah || doppeln)) erster.auftrag = 'pressen';
     const decker = erster && erster.auftrag === 'pressen' ? zweiter : erster;
     if (decker && abstand(decker, b) < 18) decker.auftrag = 'decken';
   }
@@ -98,7 +98,7 @@ function formationsPunkt(p, team, angriff){
 function markieren(team, geg){
   const torX = eigenesTorX(team);
   const vergeben = new Set();
-  const decker = team.spieler.filter(p => p.rolle !== 'TW' && p.rolle !== 'ST' && p.auftrag === 'position' && p !== spiel.gesteuert);
+  const decker = team.spieler.filter(p => p.rolle !== 'TW' && p.rolle !== 'ST' && p.auftrag === 'position' && !p.st);
   for (const p of decker){
     let bester = null, bestD = 14;
     for (const o of geg.spieler){

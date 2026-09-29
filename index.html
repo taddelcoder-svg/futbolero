@@ -81,6 +81,8 @@
     display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
   .rund svg{width:20px;height:20px}
   .hud.an ~ .rund{display:flex}
+  .online .pausenknopf{display:none !important}
+  .online .tonknopf{right:calc(14px + env(safe-area-inset-right,0px))}
   .pausenknopf{right:calc(14px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
   .tonknopf{right:calc(66px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
   .rund:focus-visible,.knopf:focus-visible,.wahl button:focus-visible,.pfeil:focus-visible{outline:3px solid var(--flutlicht);outline-offset:3px}
@@ -146,6 +148,25 @@
   .baum small{display:block;font-size:13px;opacity:.8;font-weight:600}
   .hinweis{font-size:16px;font-weight:600;opacity:.9;margin:0 0 14px}
   .pokal{display:block;width:120px;height:120px;margin:0 auto 8px}
+  .feld{font:inherit;font-weight:700;font-size:19px;width:min(220px,55vw);padding:7px 10px;border-radius:8px;border:2px solid rgba(244,247,242,.6);background:rgba(0,0,0,.25);color:var(--kreide);user-select:text;-webkit-user-select:text}
+  .feld::placeholder{color:rgba(244,247,242,.55)}
+  .feld.code{width:110px;text-transform:uppercase;letter-spacing:.2em;text-align:center}
+  .feld:focus-visible{outline:3px solid var(--flutlicht);outline-offset:2px}
+  .hinweis.fehler{color:#ffd2cc;font-weight:800}
+  .raumcode{display:flex;align-items:baseline;gap:12px;margin:4px 0 6px}
+  .raumcode span{font-size:17px;font-weight:700;opacity:.9}
+  .raumcode b{font-size:44px;font-weight:800;letter-spacing:.14em;line-height:1;background:rgba(0,0,0,.25);padding:4px 12px;border-radius:8px;user-select:text;-webkit-user-select:text}
+  .lobby{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 12px}
+  .lobby-team{background:rgba(0,0,0,.22);border-radius:10px;padding:10px}
+  .lobby-kopf{display:flex;align-items:center;gap:6px;font-size:19px;margin-bottom:6px}
+  .lobby-kopf b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lobby-kopf .pfeil{width:28px;height:28px;font-size:13px;flex:none}
+  .lobby-team ul{list-style:none;margin:0 0 8px;padding:0;font-size:17px;font-weight:700}
+  .lobby-team li{padding:3px 0;border-top:1px solid rgba(244,247,242,.2)}
+  .lobby-team li.ich{color:var(--flutlicht)}
+  .lobby-team li.leer{opacity:.65;font-weight:600}
+  .lobby-team small{font-weight:600;opacity:.8}
+  .knopf.klein{font-size:16px;padding:6px 10px;width:100%}
   .nur-touch{display:none}
   .touch .nur-touch{display:inline}
   .touch .nur-tastatur{display:none}
@@ -248,6 +269,7 @@
       <div class="wahl" data-einst="modus">
         <button data-wert="freund">Freundschaftsspiel</button>
         <button data-wert="pokal">Pokal</button>
+        <button data-wert="online">Online</button>
       </div>
     </div>
     <div class="zeile"><span>Dein Team</span>
@@ -330,6 +352,7 @@
 <script src="js/eingabe.js"></script>
 <script src="js/spiel.js"></script>
 <script src="js/elfmeter.js"></script>
+<script src="js/online.js"></script>
 <script src="js/oberflaeche.js"></script>
 </body>
 </html>

@@ -160,3 +160,26 @@ function eingabeRahmenEnde(){
   for (const t of Object.values(eingabe.tasten)){ t.neu = false; t.los = false; }
   eingabe.tipp = false;
 }
+
+/* ---------- Eingaben von Mitspielern übers Netz ----------
+   Der Gastgeber führt für jeden Mitspieler so ein Objekt. Gedrückt (d) und losgelassen (u, mit
+   Haltedauer) kommen einzeln an, damit auch ein kurzes Antippen nicht verloren geht. */
+function fernEingabe(){
+  return { x:0, z:0, sprint:false, tipp:false, tasten:{ pass:neueTaste(), schuss:neueTaste(), heber:neueTaste(), wechsel:neueTaste() } };
+}
+function fernAnwenden(e, m){
+  const zahl = v => Number.isFinite(v) ? v : 0;
+  const x = clamp(zahl(m.x), -1, 1), z = clamp(zahl(m.z), -1, 1), l = Math.hypot(x, z);
+  e.x = l > 1 ? x / l : x; e.z = l > 1 ? z / l : z;
+  e.sprint = !!m.sp;
+  for (const n of Array.isArray(m.d) ? m.d : []){
+    const t = e.tasten[n];
+    if (t && !t.halten){ t.halten = true; t.neu = true; t.dauer = 0; t.verbraucht = false; }
+  }
+  for (const u of Array.isArray(m.u) ? m.u : []){
+    const t = Array.isArray(u) && e.tasten[u[0]];
+    if (t && (t.halten || t.neu)){ t.halten = false; t.los = true; if (Number.isFinite(u[1])) t.dauer = clamp(u[1], 0, 5); }
+  }
+}
+function fernRahmen(e, dt){ for (const t of Object.values(e.tasten)) if (t.halten) t.dauer += dt; }
+function fernRahmenEnde(e){ for (const t of Object.values(e.tasten)){ t.neu = false; t.los = false; } }

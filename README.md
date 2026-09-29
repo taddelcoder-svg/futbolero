@@ -10,12 +10,22 @@ mit Einwurf, Ecke, Abstoß, Halbzeit, Torjubel und Wiederholung.
 - **Pokal:** Viertelfinale, Halbfinale, Finale gegen immer stärkere Gegner. Bei Unentschieden gibt es
   Elfmeterschießen – als Schütze mit Fadenkreuz und Kraft, als Torwart wählst du die Ecke.
 
-- **Olympiade:** Disziplin der Swimming-Lions-Olympiade. Mit dem Ticket-Link (`?olymp=…`) spielt jeder
-  ein Spiel gegen denselben Computer-Gegner mit den Einstellungen der Disziplin (Stärke, Spielzeit,
-  Spielerzahl). Der Server prüft das Ticket und meldet `Tordifferenz × 100 + eigene Tore` als Wert.
+- **Online:** Raum erstellen, Code weitergeben, bis zu 12 Leute spielen zusammen oder gegeneinander.
+  Jeder steuert einen Feldspieler, freie Plätze und die Torhüter übernimmt der Computer.
+- **Olympiade:** Disziplin der Swimming-Lions-Olympiade. Mit dem Ticket-Link (`?olymp=…`) landet die
+  Gruppe automatisch in einem gemeinsamen Online-Raum, wird auf zwei Teams verteilt und spielt mit den
+  Einstellungen der Disziplin. Angepfiffen wird, sobald alle da sind (spätestens nach 60 Sekunden).
+  Der Server meldet die Rangliste: Sieg 2, Unentschieden 1, Niederlage 0 (× 100) plus eigene Tore.
+
+## So funktioniert Online
+
+Der Browser des Gastgebers rechnet das Spiel wie im Einzelspieler. Die anderen schicken nur ihre
+Eingaben (über den Server an den Gastgeber) und bekommen etwa 30-mal pro Sekunde den Spielstand, den
+sie 100 ms verzögert und interpoliert anzeigen. Verlässt ein Mitspieler das Spiel, übernimmt der
+Computer; verlässt der Gastgeber es, endet das Spiel mit dem aktuellen Stand.
 
 Einstellungen und Bilanz (Siege, Tore, Pokale) bleiben im Browser gespeichert (`localStorage`).
-Es gibt keine Konten.
+Es gibt keine Konten. Für Online-Spiele wählt man einen Spitznamen.
 
 ## Steuerung
 
@@ -32,10 +42,11 @@ Wer den Schuss-Knopf drückt, während ein Pass unterwegs ist, schießt direkt.
 ## Lokal starten
 
 ```bash
+npm install
 npm start
 ```
 
-Dann http://localhost:10000 öffnen. Es gibt keine Abhängigkeiten außer Node ≥ 18.
+Dann http://localhost:10000 öffnen. Einzige Abhängigkeit ist `ws` (`npm install`), Node ≥ 18.
 
 ## Deployment (Render)
 
@@ -50,7 +61,7 @@ Es muss dasselbe sein wie bei der Olympiade, denn daraus wird auch der Schlüsse
 ## Aufbau
 
 ```
-server.js          liefert die Seite, den Spielcode und vendor/ aus, prüft Olympia-Tickets
+server.js          liefert die Seite aus, Online-Räume und Olympia (WebSocket /ws)
 zugang.js          Passwortschutz (Vorlage aus olympiade/geteilt/)
 olymp.js           Olympia-Anbindung (Vorlage aus olympiade/geteilt/)
 index.html         Oberfläche und Styles
@@ -65,6 +76,7 @@ js/
   eingabe.js       Tastatur, Touch, Controller
   spiel.js         Spielablauf, Regeln, Standards, Wiederholung, Kamera
   elfmeter.js      Elfmeterschießen
+  online.js        Online-Räume, Lobby, Spielstand senden und anzeigen
   oberflaeche.js   Menü, Pokal, Dialoge, HUD, Hauptschleife
 vendor/            three.js r128 (MIT) und Barlow Semi Condensed (SIL OFL) – selbst ausgeliefert
 ```
