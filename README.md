@@ -42,14 +42,16 @@ Dann http://localhost:10000 öffnen. Es gibt keine Abhängigkeiten außer Node �
 Das `Dockerfile` startet den Node-Server auf `$PORT` (Render: *New → Web Service*, Umgebung Docker).
 `/healthz` antwortet mit `{"ok":true}`.
 
-Für die Olympiade braucht der Dienst die Umgebungsvariable `ZUGANG_PASSWORT` – dasselbe Passwort wie
-die Olympiade, denn daraus wird der Schlüssel für die Tickets abgeleitet. `olymp.js` ist die Vorlage aus
+Umgebungsvariable `ZUGANG_PASSWORT`: das gemeinsame Passwort für Familie und Freunde (`zugang.js`,
+wie bei den anderen Spielen). Ohne sie bleibt die Seite auf Render gesperrt, lokal ist sie offen.
+Es muss dasselbe sein wie bei der Olympiade, denn daraus wird auch der Schlüssel für die Tickets abgeleitet. `olymp.js` ist die Vorlage aus
 `olympiade/geteilt/`; bei Änderungen dort hierher kopieren.
 
 ## Aufbau
 
 ```
 server.js          liefert die Seite, den Spielcode und vendor/ aus, prüft Olympia-Tickets
+zugang.js          Passwortschutz (Vorlage aus olympiade/geteilt/)
 olymp.js           Olympia-Anbindung (Vorlage aus olympiade/geteilt/)
 index.html         Oberfläche und Styles
 datenschutz.html   Datenschutzerklärung

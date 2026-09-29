@@ -5,6 +5,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zugang = require('./zugang')({ titel:'Futbolero' });
 const olymp = require('./olymp')({ spiel:'futbolero' });
 
 const PORT = Number(process.env.PORT) || 10000;
@@ -80,14 +81,15 @@ async function olympAnfrage(req, res, url){
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/healthz') return json(res, 200, { ok:true });
+  if (url.pathname === '/datenschutz' || url.pathname === '/datenschutz.html') return senden(res, path.join(__dirname, 'datenschutz.html'), 'no-cache');
+  // Olympia-Meldungen tragen ihr signiertes Ticket selbst, dafür braucht es kein Passwort
   if (url.pathname === '/api/olymp') return olympAnfrage(req, res, url).then(r => r === null && json(res, 405, { fehler:'Nicht erlaubt' }));
+  // Passwort für Familie und Freunde; ein gültiges Olympia-Ticket im Link ersetzt es (zugang.js)
+  if (zugang.pruefen(req, res)) return;
   if (req.method !== 'GET' && req.method !== 'HEAD'){
     res.writeHead(405, { 'Content-Type':'text/plain; charset=utf-8', Allow:'GET, HEAD' });
     return res.end('Nicht erlaubt');
-  }
-  if (url.pathname === '/healthz'){
-    res.writeHead(200, { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' });
-    return res.end('{"ok":true}');
   }
   if (SEITEN[url.pathname]) return senden(res, path.join(__dirname, SEITEN[url.pathname]), 'no-cache');
 
