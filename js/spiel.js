@@ -764,6 +764,7 @@ function platz(p, x, z, blickX, blickZ){
 }
 
 function standardAufstellen({ art, team, x = 0, z = 0 }){
+  spiel.letzterStandard = { art, team, x, z };
   const geg = gegnerVon(team), s = team.seite;
   for (const p of spiel.alle) zustandZuruecksetzen(p);
   ball.imTor = 0; ball.passZiel = null; ball.art = null; ball.zuletzt = null;

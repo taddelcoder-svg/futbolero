@@ -146,6 +146,28 @@ function beitreten(ws, raum, id, name, teamWunsch){
   raumZeigen(raum);
 }
 
+/* ---------- Gastgeber-Wechsel ----------
+   Der Browser des Gastgebers rechnet das Spiel. Ist sein Tab im Hintergrund (Handy weggelegt) oder
+   verlässt er das Spiel, übernimmt jemand mit sichtbarem Spiel ab dem letzten Spielstand. */
+const HOST_VERSTECKT_MS = 2000;
+const sichtbar = (raum, ausser) => [...raum.mitglieder.values()].find(x => x.id !== ausser && !x.ws.versteckt);
+function hostWechseln(raum, neu, weg){
+  raum.host = neu.id;
+  anAlle(raum, { t:'host', id:neu.id, weg:weg || null });
+}
+function hostPruefen(raum){
+  const host = raum.mitglieder.get(raum.host);
+  if (raum.phase !== 'spiel' || !host || !host.ws.versteckt){ clearTimeout(raum.hostUhr); raum.hostUhr = null; return; }
+  if (raum.hostUhr) return;
+  raum.hostUhr = setTimeout(() => {
+    raum.hostUhr = null;
+    const alt = raum.mitglieder.get(raum.host), neu = alt && sichtbar(raum, alt.id);
+    if (!raeume.has(raum.code) || raum.phase !== 'spiel' || !alt || !alt.ws.versteckt || !neu) return;
+    hostWechseln(raum, neu, null);
+    raumZeigen(raum);
+  }, HOST_VERSTECKT_MS);
+}
+
 function verlassen(ws){
   const raum = ws.raum;
   if (!raum) return;
@@ -155,14 +177,16 @@ function verlassen(ws){
   raum.mitglieder.delete(ws.id);
   if (raum.phase === 'spiel'){
     if (raum.host === ws.id){
-      // Ohne Gastgeber kann niemand weiterrechnen: das Spiel endet mit dem letzten Stand
-      spielEnde(raum, raum.stand, raum.letzteTore || {}, true);
+      // Ein anderer rechnet ab dem letzten Spielstand weiter; ist niemand mehr da, endet das Spiel
+      const neu = sichtbar(raum) || raum.mitglieder.values().next().value;
+      if (neu) hostWechseln(raum, neu, ws.id);
+      else spielEnde(raum, raum.stand, raum.letzteTore || {}, true);
     } else {
       const host = raum.mitglieder.get(raum.host);
       if (host) senden1(host.ws, { t:'weg', id:ws.id });
     }
   }
-  if (raum.host === ws.id) raum.host = raum.mitglieder.size ? raum.mitglieder.keys().next().value : null;
+  if (raum.host === ws.id) raum.host = raum.mitglieder.size ? (sichtbar(raum) || raum.mitglieder.values().next().value).id : null;
   if (!raum.mitglieder.size && (!raum.olymp || raum.phase !== 'lobby' || raum.gewertet)){ raeume.delete(raum.code); return; }
   raumZeigen(raum);
 }
@@ -174,6 +198,7 @@ function spielStart(raum){
   raum.startListe = [...raum.mitglieder.values()].map(x => ({ id:x.id, name:x.name, team:x.team }));
   anAlle(raum, { t:'start', host:raum.host, einst:raum.einst, mitglieder:raum.startListe });
   raumZeigen(raum);
+  hostPruefen(raum);
 }
 
 function spielEnde(raum, tore, schuetzen, abgebrochen){
@@ -299,6 +324,10 @@ wss.on('connection', ws => {
         return olympBeitreten(ws, m.ticket);
       case 'verlassen':
         return verlassen(ws);
+      case 'sicht':
+        ws.versteckt = m.v === false;
+        if (raum) hostPruefen(raum);
+        return;
     }
     if (!raum) return;
     const ich = raum.mitglieder.get(ws.id);

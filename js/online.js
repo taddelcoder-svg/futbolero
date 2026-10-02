@@ -217,6 +217,7 @@ function onlineNachricht(m){
       break;
     }
     case 'ende': return onlineEnde(m);
+    case 'host': return gastgeberWechsel(m);
     case 'fehler':
       if (m.olymp){
         online.rolle = 'aus';
@@ -249,6 +250,7 @@ function onlineSpielStarten(m){
   Ton.stimmungSetzen(0.35);
   schilderBauen();
   document.documentElement.classList.add('online');
+  sichtMelden();
 }
 
 /* ---------- Gastgeber ---------- */
@@ -267,8 +269,14 @@ function spielstand(){
     b:[r2(ball.x), r2(ball.y), r2(ball.z), r2(ball.vx), r2(ball.vz)], bb:ball.besitzer ? spiel.alle.indexOf(ball.besitzer) : -1,
     p, st:spiel.steuerer.map(k => [k.id, k.spieler ? spiel.alle.indexOf(k.spieler) : -1]),
     ts:spiel.torschuetze ? spiel.alle.indexOf(spiel.torschuetze) : -1, tt:spiel.torTeam ? spiel.torTeam.idx : -1, tsd:spiel.torSeite,
-    tg, ev:online.ev.splice(0)
+    tg, ev:online.ev.splice(0),
+    // Für einen Gastgeber-Wechsel: anstehender Standard, Anstoß-Reihenfolge, Tore Ausgestiegener
+    na:standardFuerWechsel(), at:[spiel.ersterAnstoss, spiel.anstossTeam], wt:online.wegTore
   };
+}
+function standardFuerWechsel(){
+  const st = spiel.phase === 'aus' ? spiel.naechster : spiel.phase === 'warten' ? spiel.letzterStandard : null;
+  return st && st.team ? [st.art, st.team.idx, r2(st.x || 0), r2(st.z || 0)] : null;
 }
 function onlineHostTakt(dt){
   online.sendeTakt -= dt;
@@ -300,6 +308,52 @@ function effektAbspielen(ev){
   const name = EFFEKTE[art];
   if (name) Ton[name](...a);
 }
+
+/* ---------- Gastgeber-Wechsel ----------
+   Der Server bestimmt einen neuen Gastgeber, wenn der alte weg ist oder sein Tab im Hintergrund liegt.
+   Wer übernimmt, rechnet ab dem letzten empfangenen Spielstand weiter. */
+function gastgeberWechsel(m){
+  if (online.rolle !== 'host' && online.rolle !== 'gast') return;
+  const ich = m.id === online.ich;
+  online.host = ich;
+  if (ich && online.rolle === 'gast') gastgeberWerden();
+  else if (!ich && online.rolle === 'host'){
+    meldung('Neuer Gastgeber', 'Ein Mitspieler rechnet jetzt das Spiel');
+    online.rolle = 'gast'; online.staende = []; online.ev = [];
+    spiel.phase = 'online'; spiel.pause = false;
+  }
+  if (m.weg) onlineNachricht({ t:'weg', id:m.weg });
+}
+function gastgeberWerden(){
+  const letzt = online.staende[online.staende.length - 1], d = letzt && letzt.d;
+  if (d){
+    // Der genaue letzte Stand statt der verzögerten Anzeige
+    spiel.alle.forEach((q, i) => { const o = i * 13; q.x = d.p[o]; q.z = d.p[o + 1]; q.y = d.p[o + 2]; q.dir = d.p[o + 3]; });
+    [ball.x, ball.y, ball.z, ball.vx, ball.vz] = d.b; ball.vy = 0;
+    ball.besitzer = d.bb >= 0 ? spiel.alle[d.bb] : null;
+    for (const k of spiel.steuerer) if (d.tg && k.id in d.tg) k.tore = d.tg[k.id];
+    if (d.wt) Object.assign(online.wegTore, d.wt);
+    if (Array.isArray(d.at)){ spiel.ersterAnstoss = d.at[0]; spiel.anstossTeam = d.at[1]; }
+  }
+  for (const q of spiel.alle){ q.vx = q.vz = q.wx = q.wz = 0; q.sprungT = 0; }
+  meldung('Du bist jetzt Gastgeber', 'Dein Browser rechnet das Spiel – lass diesen Tab vorne');
+  online.rolle = 'host'; online.staende = []; online.ev = []; online.sendeTakt = 0;
+  spiel.pause = false; spiel.phaseZeit = 0;
+  const ph = d ? d.ph : 'spiel';
+  if (ph === 'aus' || ph === 'warten' || ((ph === 'pause-halbzeit' || ph === 'halbzeit-online') && spiel.halbzeit === 2)){
+    // Standard neu aufstellen (ohne bekannten Standard: Anstoß)
+    spiel.naechster = d && Array.isArray(d.na) && spiel.teams[d.na[1]]
+      ? { art:d.na[0], team:spiel.teams[d.na[1]], x:d.na[2], z:d.na[3] }
+      : { art:'anstoss', team:spiel.teams[spiel.anstossTeam] };
+    spiel.phase = 'aus'; spiel.phaseZeit = 1.1;
+  } else if (ph === 'tor' || ph === 'wiederholung' || ph === 'warten-anstoss') anstossNachTor();
+  else if (ph === 'pause-halbzeit' || ph === 'halbzeit-online') spiel.phase = 'halbzeit-online';
+  else if (ph === 'abpfiff' || ph === 'ende') spiel.phase = 'abpfiff';
+  else spiel.phase = 'spiel';
+}
+// Sichtbarkeit an den Server: liegt der Tab des Gastgebers im Hintergrund, übernimmt ein anderer
+function sichtMelden(){ if (online.ws) onlineSenden({ t:'sicht', v:!document.hidden }); }
+document.addEventListener('visibilitychange', sichtMelden);
 
 /* ---------- Gäste ---------- */
 function onlineGastTakt(dt){
