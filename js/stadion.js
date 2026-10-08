@@ -125,6 +125,7 @@ function rasenBauen(){
   );
   rasen.receiveShadow = true;
   szene.add(rasen);
+  Welt.rasen = rasen;
   // Boden rund ums Feld
   const boden = new THREE.Mesh(new THREE.PlaneGeometry(420, 420).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color:0x1b2620 }));
   boden.position.y = -0.03;

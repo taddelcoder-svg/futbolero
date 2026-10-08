@@ -6,7 +6,7 @@ function neueTaste(){ return { halten:false, neu:false, los:false, dauer:0, verb
 const eingabe = {
   x:0, z:0, sprint:false, tipp:false,
   tasten:{ pass:neueTaste(), schuss:neueTaste(), heber:neueTaste(), wechsel:neueTaste(), graetsche:neueTaste() },
-  beiPause:null, beiTon:null, aktiv:false
+  beiPause:null, beiTon:null, beiKamera:null, aktiv:false
 };
 
 function druecken(name, quelle){
@@ -39,6 +39,7 @@ addEventListener('keydown', e => {
   Ton.start();
   if (e.code === 'KeyP' || e.code === 'Escape'){ if (!e.repeat && eingabe.beiPause) eingabe.beiPause(); return; }
   if (e.code === 'KeyM' && !e.repeat && eingabe.beiTon){ eingabe.beiTon(); return; }
+  if (e.code === 'KeyC' && !e.repeat && eingabe.beiKamera && !(document.activeElement && document.activeElement.tagName === 'INPUT')){ eingabe.beiKamera(); return; }
   if (!eingabe.aktiv) return;
   if (SPIELTASTEN.has(e.code)){
     e.preventDefault();
@@ -165,7 +166,8 @@ function eingabeRahmen(dt){
   const quellen = [[kx, kz], [stick.x, stick.z], p ? [p.x, p.z] : [0, 0]];
   let bx = 0, bz = 0, bl = 0;
   for (const [x, z] of quellen){ const l = Math.hypot(x, z); if (l > bl){ bl = l; bx = x; bz = z; } }
-  eingabe.x = bx; eingabe.z = bz;
+  // Bei der Kamera hinter dem Spieler gilt die Richtung relativ zum Bildschirm
+  [eingabe.x, eingabe.z] = eingabeDrehen(bx, bz);
   eingabe.sprint = tastatur.has('ShiftLeft') || tastatur.has('ShiftRight') || touchSprint || Math.hypot(stick.x, stick.z) > 0.96 || !!(p && p.sprint);
 }
 function eingabeRahmenEnde(){
