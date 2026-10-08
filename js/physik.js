@@ -50,6 +50,21 @@ function ballTeilschritt(dt, melde){
   }
   torKollision(1, vorX, vorY, vorZ, melde);
   torKollision(-1, vorX, vorY, vorZ, melde);
+  // Halle und Käfig: Wände direkt an den Linien (nur das Tor ist offen)
+  if (ARENA.wand && ball.y < ARENA.wandH){
+    const gz = HB - BALL_R, gx = HL - BALL_R;
+    if (Math.abs(ball.z) > gz && Math.abs(vorZ) <= gz + 0.05){
+      const sz = Math.sign(ball.z);
+      ball.z = sz * gz;
+      if (ball.vz * sz > 0){ if (Math.abs(ball.vz) > 3) melde('wand', Math.abs(ball.vz)); ball.vz *= -0.72; ball.vx *= 0.94; }
+    }
+    const torMund = Math.abs(ball.z) < TOR.B / 2 + TOR.R && ball.y < TOR.H + TOR.R;
+    if (Math.abs(ball.x) > gx && Math.abs(vorX) <= gx + 0.05 && !torMund && !ball.imTor){
+      const sx = Math.sign(ball.x);
+      ball.x = sx * gx;
+      if (ball.vx * sx > 0){ if (Math.abs(ball.vx) > 3) melde('wand', Math.abs(ball.vx)); ball.vx *= -0.72; ball.vz *= 0.94; }
+    }
+  }
   // Werbebanden halten den Ball im Stadion
   const bx = HL + BANDE - BALL_R - 0.07, bz = HB + BANDE - BALL_R - 0.07;
   if (ball.y < 0.9 + BALL_R){

@@ -59,18 +59,25 @@ function uebernehmen(p, von){
 }
 
 /* ---------- Mannschaften ---------- */
-function teamBauen(idx, daten, kit, groesse, mensch, stufe){
+// kader: optional eine Liste {name, nummer, werte, star} je Platz der Aufstellung (Liga)
+// mitWerten: Spielerwerte wirken (online nicht, damit es fair bleibt); staerke: für die Grundwerte
+function teamBauen(idx, daten, kit, groesse, mensch, stufe, kader, mitWerten, staerke){
   const team = { idx, daten, kit, seite:idx === 0 ? 1 : -1, mensch, tore:0, spieler:[],
-    stat:{ schuesse:0, aufsTor:0, paesse:0, angekommen:0, besitz:0, paraden:0, ecken:0 } };
+    stat:{ schuesse:0, aufsTor:0, paesse:0, angekommen:0, besitz:0, paraden:0, ecken:0 },
+    pu:{ turbo:0, kanone:0, mauer:0, eis:0 } };
   team.kiProfil = profil(mensch ? 1 : stufe);
   team.twProfil = profil(mensch ? Math.max(1.1, stufe * 0.5 + 0.6) : stufe);
   const nummern = { TW:[...NUMMERN.TW], AB:[...NUMMERN.AB], MI:[...NUMMERN.MI], ST:[...NUMMERN.ST] };
   FORMATIONEN[groesse].forEach((form, i) => {
-    const nummer = nummern[form.rolle].shift() || 12 + i;
+    const info = kader && kader[i];
+    const nummer = info ? info.nummer : nummern[form.rolle].shift() || 12 + i;
+    const werte = info ? info.werte : werteFuer(daten.id, form.rolle, nummer, staerke != null ? staerke : daten.staerke);
     const figur = figurBauen(kit, nummer, form.rolle === 'TW', kit.torwart);
     szene.add(figur.wurzel);
     team.spieler.push({
       team, idx:i, rolle:form.rolle, form, nummer, figur,
+      name:info ? info.name : nameFuer(daten.id, nummer), star:!!(info && info.star), werte,
+      f:mitWerten ? faktorenAus(werte, form.rolle) : NEUTRAL, statue:false,
       x:0, z:0, y:0, vx:0, vz:0, wx:0, wz:0, dir:team.seite > 0 ? 0 : Math.PI, tempo:0, lauf:Math.random() * 6,
       sperre:0, betaeubt:0, schussT:0, kopfT:0, sprungT:0, fallT:0,
       graetsche:0, graetscheDir:0, graetscheV:0,
@@ -96,7 +103,10 @@ function spielStarten(opt){
   // Online spielen Menschen gegeneinander: beide Teams bekommen dieselbe KI-Stärke
   const online = opt.modus === 'online';
   const mensch = opt.modus !== 'demo' && !online;
-  spiel.teams = [teamBauen(0, A, kits[0], opt.groesse, mensch, online ? opt.stufe : 1), teamBauen(1, B, kits[1], opt.groesse, false, opt.stufe)];
+  arenaSetzen(opt.arena || 'stadion');
+  const k = opt.kader || [], st = opt.staerken || [];
+  spiel.teams = [teamBauen(0, A, kits[0], opt.groesse, mensch, online ? opt.stufe : 1, k[0], !online, st[0]),
+    teamBauen(1, B, kits[1], opt.groesse, false, opt.stufe, k[1], !online, st[1])];
   spiel.alle = [...spiel.teams[0].spieler, ...spiel.teams[1].spieler];
   steuererAnlegen(opt.menschen || (mensch ? [{ id:'ich', team:0 }] : []), opt.ich || 'ich');
   fansEinkleiden(kits[0], kits[1]);
@@ -105,6 +115,7 @@ function spielStarten(opt){
     standard:null, naechster:null, elfmeter:null, pause:false, zeit:0, ladung:0
   });
   aufnahmeStart();
+  powerupsZuruecksetzen(!!opt.powerups);
   spiel.ersterAnstoss = spiel.anstossTeam = zufallGanz(2);
   if (typeof hudTeams === 'function') hudTeams();
   standardAufstellen({ art:'anstoss', team:spiel.teams[spiel.anstossTeam] });
@@ -149,17 +160,21 @@ function ballSpielen(p, vx, vy, vz, art, lautst = 0.6){
   Ton.schuss(lautst);
 }
 
-function schiessen(p, kraft, zielZ, fehler){
+function schiessen(p, kraft, zielZ, fehler, hoch = 0){
   const s = p.team.seite, torX = s * HL;
   kraft = clamp(kraft, 0.15, 1);
+  fehler *= p.f.schuss;
+  // Powerup „Kanone“: härter und genauer
+  const kanone = p.team.pu.kanone > 0;
+  if (kanone){ p.team.pu.kanone--; fehler *= 0.45; kraft = Math.max(kraft, 0.8); }
   const dx = torX - ball.x;
   const d0 = Math.hypot(dx, zielZ - ball.z);
   const sigma = (0.2 + d0 * 0.02 + kraft * kraft * 0.6) * fehler;
   const zz = zielZ + gauss() * sigma;
-  let yZiel = 0.3 + kraft * 1.4 + zufall(-0.15, 0.25) + gauss() * sigma * 0.5;
+  let yZiel = 0.3 + kraft * 1.4 + zufall(-0.15, 0.25) + gauss() * sigma * 0.5 + hoch;
   if (kraft > 0.92) yZiel += (kraft - 0.92) * 13;
   yZiel = Math.max(0.22, yZiel);
-  const v = 14 + kraft * 19;
+  const v = (14 + kraft * 19) * (kanone ? 1.18 : 1);
   const w = schussWinkel(v, Math.hypot(dx, zz - ball.z), yZiel, ball.y);
   const vec = schussVektor(dx, zz - ball.z, v, w);
   ballSpielen(p, vec.vx, vec.vy, vec.vz, 'schuss', 0.5 + kraft * 0.5);
@@ -186,6 +201,7 @@ function passSpielen(p, m, art, fehler = 0.05){
     tx = clamp(m.x + m.vx * t * vorhalt, -HL + 0.8, HL - 0.8);
     tz = clamp(m.z + m.vz * t * vorhalt, -HB + 0.8, HB - 0.8);
   }
+  fehler *= p.f.pass;
   const r = Math.atan2(tz - ball.z, tx - ball.x) + gauss() * fehler;
   const vec = schussVektor(Math.cos(r), Math.sin(r), v * (1 + gauss() * fehler * 0.4), winkel);
   ballSpielen(p, vec.vx, vec.vy, vec.vz, 'pass', art === 'flach' ? 0.35 : 0.5);
@@ -257,7 +273,7 @@ function menschPass(p, art){
   else passInDenRaum(p, dx, dz, art);
 }
 
-function menschSchuss(p, kraft, direkt){
+function menschSchuss(p, kraft, direkt, hoch = 0){
   const e = p.st ? p.st.e : eingabe;
   const m = Math.hypot(e.x, e.z);
   let zielZ;
@@ -267,7 +283,7 @@ function menschSchuss(p, kraft, direkt){
   let fehler = 0.8;
   if (e.sprint) fehler *= 1.15;
   if (direkt) fehler *= 1.2;
-  schiessen(p, kraft, zielZ, fehler);
+  schiessen(p, kraft, zielZ, fehler, hoch);
 }
 
 function menschAktionen(k){
@@ -452,7 +468,7 @@ function zweikaempfe(dt){
     if (q.betaeubt > 0 || q.sperre > 0 || q.graetsche > 0 || q.fallT > 0 || q.hecht > 0) continue;
     const dBall = Math.hypot(q.x - ball.x, q.z - ball.z);
     if (dBall > 0.9) continue;
-    let rate = q.st ? 2.6 : q.team.kiProfil.klau;
+    let rate = (q.st ? 2.6 : q.team.kiProfil.klau) * q.f.abwehr;
     const zuBall = Math.atan2(ball.z - q.z, ball.x - q.x);
     rate *= Math.cos(winkelDiff(q.dir, zuBall)) > 0.3 ? 1 : 0.45;
     rate *= 1 + Math.hypot(c.vx, c.vz) / 14;
@@ -506,10 +522,13 @@ function spielerBewegen(p, dt){
   p.kopfT = Math.max(0, p.kopfT - dt / 0.4);
   p.sprungT = Math.max(0, p.sprungT - dt / 0.5);
   if (p.einwurf === 2){ p.einwurfT -= dt; if (p.einwurfT <= 0) p.einwurf = 0; }
+  // In Halle und Käfig bleiben alle während des Spiels innerhalb der Wände
+  const wand = ARENA.wand && spiel.phase === 'spiel';
+  const gx = wand ? HL - 0.35 : HL + BANDE - 0.8, gz = wand ? HB - 0.35 : HB + BANDE - 0.8;
   const bewegen = () => {
     p.x += p.vx * dt; p.z += p.vz * dt;
-    p.x = clamp(p.x, -HL - BANDE + 0.8, HL + BANDE - 0.8);
-    p.z = clamp(p.z, -HB - BANDE + 0.8, HB + BANDE - 0.8);
+    p.x = clamp(p.x, -gx, gx);
+    p.z = clamp(p.z, -gz, gz);
   };
   if (p.fallT > 0){
     p.fallT += dt / 1.15;
@@ -536,7 +555,8 @@ function spielerBewegen(p, dt){
     if (p.hecht >= 1){ p.hecht = 0; p.betaeubt = 0.45; p.vx = p.vz = 0; }
     p.tempo = 0; return;
   }
-  let wx = p.wx, wz = p.wz;
+  const tf = tempoFaktor(p);
+  let wx = p.wx * tf, wz = p.wz * tf;
   if (p.betaeubt > 0 || (p.halten && ball.besitzer === p) || p.einwurf === 1){ wx = 0; wz = 0; }
   const ax = wx - p.vx, az = wz - p.vz, l = Math.hypot(ax, az);
   const maxA = ((p.vx * wx + p.vz * wz) < 0 ? 32 : 22) * dt;
@@ -576,6 +596,7 @@ function kiSchritt(dt){
     if (spiel.kiTakt <= 0){ spiel.kiTakt = 0.1; for (const t of spiel.teams) taktik(t); }
     for (const p of spiel.alle){
       if (p.st) continue;
+      if (p.statue){ p.wx = p.wz = 0; p.blick = Math.atan2(ball.z - p.z, ball.x - p.x); continue; }
       if (p.rolle === 'TW') kiTorwart(p, dt); else kiFeldspieler(p, dt);
     }
     return;
@@ -626,7 +647,7 @@ function simSchritt(dt){
   spiel.zeit += dt;
   const ph = spiel.phase;
   if (ph === 'elfmeter'){ elfmeterSim(dt); return; }
-  if (!['spiel', 'warten', 'aus', 'tor', 'pause-halbzeit', 'abpfiff'].includes(ph)) return;
+  if (!['spiel', 'warten', 'aus', 'tor', 'pause-halbzeit', 'abpfiff', 'training-pause'].includes(ph)) return;
   if (ph === 'spiel'){
     spiel.uhr += dt;
     for (const k of spiel.steuerer) if (k.spieler) menschBewegung(k);
@@ -646,6 +667,7 @@ function simSchritt(dt){
     // Ball bleibt in der Nähe des Felds
     if (ph === 'aus' && !ball.imTor){ ball.vx *= 0.99; ball.vz *= 0.99; }
   }
+  if (ph === 'spiel') powerupsSchritt(dt);
   if (++spiel.takt % 2 === 0) aufnehmen();
 }
 spiel.takt = 0;
@@ -656,6 +678,7 @@ function physikMeldung(art, staerke){
     Fans.aufregung = 1;
   } else if (art === 'netz'){ Ton.netz(); }
   else if (art === 'aufsetzer'){ Ton.schuss(Math.min(0.25, staerke / 40)); }
+  else if (art === 'wand'){ Ton.schuss(Math.min(0.35, staerke / 30)); }
 }
 
 /* ---------- Regeln ---------- */
@@ -676,6 +699,7 @@ function regelnPruefen(){
 }
 
 function ausGeben(art, team, x, z, danebenGeschossen){
+  if (spiel.modus === 'training') return trainingVersuchEnde(danebenGeschossen ? 'Vorbei' : 'Im Aus');
   if (ball.besitzer){ ball.besitzer.halten = false; ball.besitzer = null; }
   spiel.phase = 'aus'; spiel.phaseZeit = 0;
   spiel.naechster = { art, team, x, z };
@@ -715,7 +739,7 @@ function torGefallen(s){
 }
 
 function zeitPruefen(dt){
-  if (spiel.modus === 'demo') return;
+  if (spiel.modus === 'demo' || spiel.modus === 'training') return;
   if (spiel.uhr < spiel.halbDauer) return;
   // Kurz nachspielen lassen, solange es vor einem Tor brennt
   const gefahr = Math.abs(ball.x) > HL - 20 && spiel.nachspiel < 7;
@@ -754,7 +778,7 @@ function umblenden(fn){
 
 function zustandZuruecksetzen(p){
   Object.assign(p, { vx:0, vz:0, wx:0, wz:0, sperre:0, betaeubt:0, schussT:0, kopfT:0, sprungT:0, fallT:0,
-    graetsche:0, hecht:0, jubel:false, halten:false, einwurf:0, puffer:null, blickFest:null, auftrag:'position' });
+    graetsche:0, hecht:0, jubel:false, halten:false, einwurf:0, puffer:null, blickFest:null, auftrag:'position', statue:false });
 }
 
 function platz(p, x, z, blickX, blickZ){
@@ -787,6 +811,32 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
     platz(schuetze, -s * 0.6, 0, 0, 0);
     const neben = f.find(p => p.rolle === 'MI' && p !== schuetze) || f.find(p => p !== schuetze);
     if (neben) platz(neben, -s * 1.2, 4, 0, 0);
+  } else if (art === 'freistoss' || art === 'elfmeter'){
+    // Training: direkter Freistoß mit Mauer oder Elfmeter, alle außer Schütze und Torwart stehen still
+    const torX = s * HL;
+    const bx = art === 'elfmeter' ? torX - s * ELFER_ABSTAND : x, bz = art === 'elfmeter' ? 0 : z;
+    ballSetzen(bx, BALL_R, bz);
+    const dx = torX - bx, dz = -bz, l = Math.hypot(dx, dz) || 1, ux = dx / l, uz = dz / l;
+    const f = feld(team);
+    schuetze = f.find(p => p.rolle === 'ST') || f[f.length - 1];
+    platz(schuetze, bx - ux * 0.9, bz - uz * 0.9, torX, 0);
+    f.filter(p => p !== schuetze).forEach((p, i) => { platz(p, bx - s * (9 + i * 1.5), (i % 2 ? 1 : -1) * (5 + i), bx, bz); p.statue = true; });
+    platz(team.spieler[0], eigenesTorX(team) + s * 0.8, 0, bx, bz);
+    const tw = geg.spieler[0];
+    platz(tw, torX - s * 0.45, clamp(bz * 0.08, -1, 1), bx, bz);
+    const andere = feld(geg);
+    let mauer = [];
+    if (art === 'freistoss'){
+      // Mauer 7 m vor dem Ball, etwas zum kurzen Pfosten verschoben
+      mauer = andere.slice(0, Math.min(3, andere.length));
+      const mx = bx + ux * 7, mz = bz + uz * 7, qx = -uz, qz = ux;
+      const kurz = Math.sign(bz) || 1, schieb = (qz * kurz > 0 ? 1 : -1) * 0.35;
+      mauer.forEach((p, i) => { const o = (i - (mauer.length - 1) / 2) * 0.62 + schieb; platz(p, mx + qx * o, mz + qz * o, bx, bz); p.statue = true; });
+    }
+    andere.filter(p => !mauer.includes(p)).forEach((p, i) => {
+      platz(p, torX - s * (STRAF.T + 3 + i * 2), (i % 2 ? 1 : -1) * (STRAF.B / 2 + 2), bx, bz);
+      p.statue = true;
+    });
   } else {
     // Ball liegt am Ausführungsort, danach richten sich die anderen
     let bx = x, bz = z;
@@ -845,6 +895,7 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
   if (schuetze.einwurf) dribbeln(0.016);
   steuererVerteilen(team, schuetze);
   if (art === 'anstoss') meldung('Anstoß', team.daten.name);
+  if (art === 'freistoss' || art === 'elfmeter') spiel.standard.bereit = false;
   kam.schnitt = true;
 }
 
@@ -854,6 +905,7 @@ function standardWarten(dt){
   if (!st || spiel.blende) return;
   st.zeit += dt;
   const p = st.schuetze;
+  if (p.st && (st.art === 'freistoss' || st.art === 'elfmeter')) return direktSchussWarten(st, p);
   if (p.st){
     // Zielen: der Ausführende dreht sich in Eingaberichtung
     const e = p.st.e;
@@ -870,6 +922,28 @@ function standardWarten(dt){
   } else if (st.zeit > (st.art === 'anstoss' ? 1.4 : 1.1)){
     return standardAusfuehren('auto');
   }
+}
+
+// Freistoß und Elfmeter: zielen mit der Richtung, Schuss halten = fester, Heber = Bogenlampe
+function direktSchussWarten(st, p){
+  const e = p.st.e, t = e.tasten, ich = p.st === spiel.ich;
+  const m = Math.hypot(e.x, e.z);
+  if (m > 0.2) p.blickFest = Math.atan2(e.z, e.x);
+  // Eine Taste, die vom letzten Versuch noch gedrückt ist, zählt erst nach dem Loslassen
+  if (!st.bereit){ if (!t.schuss.halten && !t.heber.halten) st.bereit = true; return; }
+  let kraft = null, hoch = 0;
+  if (t.schuss.halten && !t.schuss.verbraucht){
+    if (ich) spiel.ladung = Math.min(1, t.schuss.dauer / 0.85);
+    if (t.schuss.dauer > 1.05) kraft = 1;
+  } else if (t.schuss.los && !t.schuss.verbraucht) kraft = Math.min(1, t.schuss.dauer / 0.85);
+  if (t.heber.neu){ kraft = 0.66; hoch = 0.95; }
+  if (kraft == null) return;
+  t.schuss.verbraucht = true;
+  spiel.standard = null;
+  spiel.phase = 'spiel'; spiel.phaseZeit = 0;
+  for (const q of spiel.alle){ q.blickFest = null; q.standardPlatz = null; }
+  menschSchuss(p, Math.max(0.2, kraft), false, hoch);
+  p.sperre = 0.5;
 }
 
 function standardAusfuehren(aktion){
@@ -909,6 +983,8 @@ function standardAusfuehren(aktion){
       }
       passSpielen(p, m, 'flanke', mensch ? 0.03 : 0.06);
     }
+  } else if (st.art === 'freistoss' || st.art === 'elfmeter'){
+    kiSchuss(p);
   } else {
     // Abstoß: der Torwart spielt zum freiesten Mitspieler
     p.haltZeit = 99;
@@ -917,15 +993,22 @@ function standardAusfuehren(aktion){
   p.sperre = 0.5;
 }
 
-/* ---------- Wiederholung ---------- */
-const WDH = { laenge:9 * 60, felder:15, daten:null, gesamt:0, abspielen:null };
+/* ---------- Wiederholung ----------
+   Aufgenommen werden die letzten 9 Sekunden im Ringpuffer. Jedes Tor wird zusätzlich als Highlight
+   kopiert, damit man es zur Halbzeit oder am Ende noch einmal ansehen kann. Abgespielt wird entweder
+   als Torwiederholung (Phase 'wiederholung') oder als Extra (Szene aus der Pause, Highlights). */
+const WDH = { laenge:9 * 60, felder:15, daten:null, gesamt:0, abspielen:null, highlights:[], ansicht:0, zaehler:0 };
+const WDH_ANSICHTEN = ['Hinter dem Tor', 'Seitlich', 'Von oben', 'Fernsehen'];
 function aufnahmeStart(){
   WDH.stride = 7 + spiel.alle.length * WDH.felder;
   WDH.daten = new Float32Array(WDH.laenge * WDH.stride);
   WDH.gesamt = 0;
+  WDH.highlights = [];
+  WDH.abspielen = null;
+  WDH.zaehler = 0;
 }
 function aufnehmen(){
-  if (!WDH.daten || spiel.phase === 'wiederholung') return;
+  if (!WDH.daten || spiel.phase === 'wiederholung' || WDH.abspielen) return;
   const d = WDH.daten, o = (WDH.gesamt % WDH.laenge) * WDH.stride, q = Welt.ball.quaternion;
   d[o] = ball.x; d[o + 1] = ball.y; d[o + 2] = ball.z; d[o + 3] = q.x; d[o + 4] = q.y; d[o + 5] = q.z; d[o + 6] = q.w;
   let i = o + 7;
@@ -937,19 +1020,42 @@ function aufnehmen(){
   }
   WDH.gesamt++;
 }
-function wiederholungStarten(){
-  const von = Math.max(WDH.gesamt - WDH.laenge + 1, spiel.torFrame - Math.round(3.6 * 60));
+function torAusschnitt(){
+  const von = Math.max(WDH.gesamt - WDH.laenge + 1, spiel.torFrame - Math.round(3.6 * 60), 0);
   const bis = Math.min(WDH.gesamt - 1, spiel.torFrame + Math.round(0.9 * 60));
+  return { von, bis };
+}
+// Das gerade gefallene Tor als Highlight sichern (eigene Kopie, der Ringpuffer läuft weiter)
+function highlightSichern(){
+  if (!WDH.daten || spiel.modus === 'online' || spiel.modus === 'demo') return;
+  const { von, bis } = torAusschnitt();
+  if (bis - von < 30) return;
+  const n = bis - von + 1, kopie = new Float32Array(n * WDH.stride);
+  for (let f = 0; f < n; f++){
+    const o = ((von + f) % WDH.laenge) * WDH.stride;
+    kopie.set(WDH.daten.subarray(o, o + WDH.stride), f * WDH.stride);
+  }
+  const t = spiel.torTeam;
+  WDH.highlights.push({ daten:kopie, n, seite:spiel.torSeite, text:`${t.daten.name} · ${spiel.halbzeit === 1 ? 'Halbzeit 1' : 'Halbzeit 2'} · ${t.tore}. Tor` });
+  if (WDH.highlights.length > 12) WDH.highlights.shift();
+}
+function wiederholungStarten(){
+  highlightSichern();
+  const { von, bis } = torAusschnitt();
   if (bis - von < 30){ return anstossNachTor(); }
-  WDH.abspielen = { pos:von, von, bis };
+  WDH.abspielen = { pos:von, von, bis, ring:true, seite:spiel.torSeite };
+  // Jede Torwiederholung aus einem anderen Blickwinkel
+  WDH.ansicht = WDH.zaehler++ % 3;
   spiel.phase = 'wiederholung'; spiel.phaseZeit = 0;
   kam.schnitt = true;
+}
+function wiederholungWeiter(){
+  return eingabe.tasten.pass.neu || eingabe.tasten.schuss.neu || eingabe.tasten.heber.neu || eingabe.tipp;
 }
 function wiederholungSchritt(dt){
   const w = WDH.abspielen;
   w.pos += dt * 60 * 0.62;
-  const weiter = eingabe.tasten.pass.neu || eingabe.tasten.schuss.neu || eingabe.tasten.heber.neu || eingabe.tipp;
-  if (w.pos >= w.bis || (spiel.phaseZeit > 0.4 && weiter)){
+  if (w.pos >= w.bis || (spiel.phaseZeit > 0.4 && wiederholungWeiter())){
     WDH.abspielen = null;
     anstossNachTor();
   }
@@ -959,11 +1065,52 @@ function anstossNachTor(){
   for (const p of spiel.alle) p.jubel = false;
   umblenden(() => standardAufstellen({ art:'anstoss', team:spiel.teams[spiel.anstossTeam] }));
 }
+
+/* Extra-Wiederholungen: läuft auch in der Pause und nach dem Abpfiff. Liste von Ausschnitten,
+   danach wird „fertig“ aufgerufen (zum Beispiel, um den Dialog wieder zu zeigen). */
+function extraWiederholung(ausschnitte, fertig){
+  if (!ausschnitte.length) return fertig();
+  WDH.extra = { liste:ausschnitte, i:0, fertig, zeit:0 };
+  extraAusschnitt();
+}
+function extraAusschnitt(){
+  const x = WDH.extra, a = x.liste[x.i];
+  WDH.abspielen = a.ring ? { pos:a.von, von:a.von, bis:a.bis, ring:true, seite:a.seite, extra:true }
+    : { pos:0, von:0, bis:a.n - 1, daten:a.daten, seite:a.seite, extra:true };
+  WDH.ansicht = a.ansicht != null ? a.ansicht : x.i % 3;
+  x.zeit = 0;
+  if (a.text) tippZeigen(a.text, 3);
+  kam.schnitt = true;
+}
+function extraSchritt(dt){
+  const x = WDH.extra, w = WDH.abspielen;
+  if (!x || !w) return;
+  x.zeit += dt;
+  w.pos += dt * 60 * 0.62;
+  const weiter = x.zeit > 0.4 && wiederholungWeiter();
+  if (w.pos < w.bis && !weiter) return;
+  x.i++;
+  if (x.i < x.liste.length) return extraAusschnitt();
+  extraEnde();
+}
+function extraEnde(){
+  const x = WDH.extra;
+  WDH.extra = null; WDH.abspielen = null;
+  kam.schnitt = true;
+  if (x) x.fertig();
+}
+// Die letzten Sekunden (aus der Pause heraus)
+function szeneAusschnitt(sek = 7){
+  const bis = WDH.gesamt - 1, von = Math.max(0, WDH.gesamt - WDH.laenge + 1, bis - Math.round(sek * 60));
+  return { von, bis, ring:true, seite:Math.sign(ball.x) || 1, ansicht:3, text:'Die letzten Sekunden' };
+}
+
 // Einen aufgenommenen Moment auf Figuren und Ball legen
 function wiederholungZeigen(zeit){
   const w = WDH.abspielen;
   if (!w) return null;
-  const f = Math.min(Math.floor(w.pos), w.bis), o = (f % WDH.laenge) * WDH.stride, d = WDH.daten;
+  const f = Math.min(Math.floor(w.pos), w.bis), d = w.ring ? WDH.daten : w.daten;
+  const o = (w.ring ? f % WDH.laenge : f) * WDH.stride;
   Welt.ball.position.set(d[o], d[o + 1], d[o + 2]);
   Welt.ball.quaternion.set(d[o + 3], d[o + 4], d[o + 5], d[o + 6]);
   let i = o + 7;
@@ -978,7 +1125,11 @@ function wiederholungZeigen(zeit){
   return { x:d[o], y:d[o + 1], z:d[o + 2] };
 }
 
-/* ---------- Kamera ---------- */
+/* ---------- Kamera ----------
+   Im Spiel: Fernsehen (Standard), Nah, Hinter dem Spieler, Von oben. In Wiederholungen eigene
+   Blickwinkel. Taste C (oder der Kamera-Knopf) schaltet um. */
+const KAMERAS = ['tv', 'nah', 'hinten', 'oben'];
+const KAMERA_NAME = { tv:'Fernsehen', nah:'Nah dran', hinten:'Hinter dem Spieler', oben:'Von oben' };
 const kam = { x:0, z:0, zx:0, zy:0, zz:0, px:0, py:26, pz:HB + 32, winkel:0, schnitt:true };
 function kameraSetzen(px, py, pz, zx, zy, zz, dt, rate){
   if (kam.schnitt || !dt){ kam.px = px; kam.py = py; kam.pz = pz; kam.zx = zx; kam.zy = zy; kam.zz = zz; kam.schnitt = false; }
@@ -989,14 +1140,35 @@ function kameraSetzen(px, py, pz, zx, zy, zz, dt, rate){
   kamera.position.set(kam.px, kam.py, kam.pz);
   kamera.lookAt(kam.zx, kam.zy, kam.zz);
 }
+// Welche Kamera im laufenden Spiel gilt (hinter dem Spieler nur, wenn man selbst einen steuert)
+function spielKamera(){
+  const k = einstellungen.kamera;
+  if (k === 'hinten' && (!spiel.gesteuert || spiel.modus === 'demo')) return 'tv';
+  return KAMERAS.includes(k) ? k : 'tv';
+}
+// Bei der Kamera hinter dem Spieler zeigt „oben“ auf dem Bildschirm zum gegnerischen Tor
+function eingabeDrehen(x, z){
+  if (spielKamera() !== 'hinten' || !['spiel', 'warten'].includes(spiel.phase) || WDH.abspielen) return [x, z];
+  const s = spiel.gesteuert.team.seite;
+  return [-z * s, x * s];
+}
+function wiederholungKamera(b, dt){
+  const s = WDH.abspielen.seite || 1;
+  const ansicht = WDH.ansicht % WDH_ANSICHTEN.length;
+  if (ansicht === 0){
+    const seite = b.z > 0 ? -1 : 1;
+    kameraSetzen(s * (HL + 7), 3.4, seite * 9, b.x * 0.6 + s * HL * 0.4, 1, b.z * 0.7, dt, 3);
+  } else if (ansicht === 1){
+    kameraSetzen(b.x - s * 5, 2.4, clamp(b.z + 10, -HB - 3, HB + 3.5), b.x, 1, b.z, dt, 2.6);
+  } else if (ansicht === 2){
+    kameraSetzen(b.x - s * 4, 17, b.z + 7, b.x, 0.5, b.z, dt, 2.4);
+  } else {
+    kameraSetzen(clamp(b.x, -HL + 9, HL - 9), 16.5, HB + 16.5 + b.z * 0.2, clamp(b.x, -HL + 9, HL - 9), 0, b.z * 0.78 - 1, dt, 2.4);
+  }
+}
 function kameraSchritt(dt, wdhBall){
   const aspekt = innerWidth / innerHeight;
-  if (spiel.phase === 'wiederholung' && wdhBall){
-    const s = spiel.torSeite;
-    const seite = wdhBall.z > 0 ? -1 : 1;
-    kameraSetzen(s * (HL + 7), 3.4, seite * 9, wdhBall.x * 0.6 + s * HL * 0.4, 1, wdhBall.z * 0.7, dt, 3);
-    return;
-  }
+  if (WDH.abspielen && wdhBall){ wiederholungKamera(wdhBall, dt); return; }
   if (spiel.phase === 'tor' && spiel.torschuetze && spiel.phaseZeit > 0.6){
     const h = spiel.torschuetze;
     kameraSetzen(h.x - spiel.torSeite * 3, 5.5, h.z + 11, h.x, 1.1, h.z, dt, 1.6);
@@ -1008,13 +1180,30 @@ function kameraSchritt(dt, wdhBall){
     kameraSetzen(Math.sin(kam.winkel) * 30, 24, HB + 30 + Math.cos(kam.winkel) * 6, ball.x * 0.5, 0, ball.z * 0.3, dt, 1);
     return;
   }
-  // Fernsehkamera von der Seitenlinie
   const b = ball.besitzer;
-  const zielX = clamp(ball.x + (b ? b.vx * 0.5 : ball.vx * 0.25), -HL + 9, HL - 9);
-  const zielZ = clamp(ball.z, -HB + 4, HB - 4);
+  const art = spielKamera();
   let weit = 1;
   if (aspekt < 1.35) weit = 1 + (1.35 - aspekt) * 0.85;
   if (aspekt > 2.1) weit = 0.92;
+  if (art === 'hinten'){
+    // Über die Schulter des eigenen Spielers in Richtung gegnerisches Tor
+    const p = spiel.gesteuert, s = p.team.seite;
+    const mx = p.x * 0.65 + ball.x * 0.35, mz = p.z * 0.65 + ball.z * 0.35;
+    kameraSetzen(mx - s * 12 * weit, 6.8 * weit, mz * 0.9, mx + s * 9, 0.6, mz * 0.8, dt, 2.8);
+    return;
+  }
+  // Fernsehkamera von der Seitenlinie
+  const zielX = clamp(ball.x + (b ? b.vx * 0.5 : ball.vx * 0.25), -HL + 9, HL - 9);
+  const zielZ = clamp(ball.z, -HB + 4, HB - 4);
+  if (art === 'oben'){
+    kameraSetzen(zielX, 40 * weit, zielZ + 9, zielX, 0, zielZ - 0.5, dt, 2.4);
+    return;
+  }
+  if (art === 'nah'){
+    const nx = clamp(ball.x + (b ? b.vx * 0.4 : ball.vx * 0.2), -HL + 6, HL - 6);
+    kameraSetzen(nx, 9.5 * weit, zielZ * 0.55 + HB * 0.45 + 13 * weit, nx, 0.3, zielZ * 0.9 - 0.5, dt, 2.8);
+    return;
+  }
   const hoehe = 16.5 * weit, weg = HB + 16.5 * weit;
   kameraSetzen(zielX, hoehe, weg + zielZ * 0.2, zielX, 0, zielZ * 0.78 - 1, dt, 2.4);
 }

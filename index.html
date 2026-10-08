@@ -121,6 +121,13 @@
   .wdh{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));top:calc(62px + env(safe-area-inset-top,0px));padding:6px 12px;border-radius:6px;background:var(--rot);font-weight:800;font-size:18px;letter-spacing:.06em;display:none}
   .wdh.an{display:block;animation:blinken 1.2s infinite}
   @keyframes blinken{50%{opacity:.55}}
+  .spielerkarte{position:absolute;left:calc(14px + env(safe-area-inset-left,0px));top:calc(62px + env(safe-area-inset-top,0px));display:none;gap:8px;align-items:center;
+    padding:5px 10px;border-radius:6px;background:rgba(11,15,20,.62);font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
+  .spielerkarte.an{display:flex}
+  .spielerkarte b{color:var(--flutlicht);font-weight:800;margin-right:2px}
+  .pu{position:absolute;left:50%;bottom:calc(52px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);padding:5px 12px;border-radius:99px;
+    background:rgba(11,15,20,.6);font-weight:800;font-size:16px;white-space:nowrap;display:none}
+  .pu.an{display:block}
   .tipp{position:absolute;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translateX(-50%);padding:6px 14px;border-radius:99px;background:rgba(11,15,20,.6);font-weight:700;font-size:17px;white-space:nowrap;opacity:0;transition:opacity .4s}
   .tipp.an{opacity:1}
   .elfer{position:absolute;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);display:none;background:var(--tafel);border-radius:8px;padding:8px 12px;box-shadow:0 6px 22px rgba(0,0,0,.45)}
@@ -139,6 +146,8 @@
   .hud.an ~ .rund{display:flex}
   .online .pausenknopf{display:none !important}
   .online .tonknopf{right:calc(14px + env(safe-area-inset-right,0px))}
+  .online .kameraknopf{right:calc(66px + env(safe-area-inset-right,0px))}
+  .kameraknopf{right:calc(118px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
   .pausenknopf{right:calc(14px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
   .tonknopf{right:calc(66px + env(safe-area-inset-right,0px));top:calc(12px + env(safe-area-inset-top,0px))}
   .rund:focus-visible,.knopf:focus-visible,.wahl button:focus-visible,.pfeil:focus-visible{outline:3px solid var(--flutlicht);outline-offset:3px}
@@ -203,6 +212,35 @@
   .baum div.durch{opacity:.7}
   .baum small{display:block;font-size:13px;opacity:.8;font-weight:600}
   .hinweis{font-size:16px;font-weight:600;opacity:.9;margin:0 0 14px}
+  .hinweis.klein{font-size:14px;margin:4px 0 6px}
+  .grosszahl{font-size:64px;font-weight:800;text-align:center;margin:4px 0 8px;line-height:1}
+  .ligainfo{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right;font-size:16px;font-weight:700;white-space:normal}
+  .link{border:0;background:none;color:var(--kreide);text-decoration:underline;font-weight:700;font-size:15px;cursor:pointer;padding:0;opacity:.85}
+  .ligakopf{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:2px 0 10px;font-size:17px;font-weight:800}
+  .ligakopf .muenzen{color:var(--flutlicht)}
+  .tabelle{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+  .tabelle th{font-size:13px;font-weight:600;opacity:.8;text-align:center;padding:2px 3px}
+  .tabelle td{padding:3px 3px;border-top:1px solid rgba(244,247,242,.22);text-align:center}
+  .tabelle td.name{text-align:left;display:flex;align-items:center;gap:6px}
+  .tabelle td.name .trikot{width:18px;height:18px}
+  .tabelle td.pkt{font-weight:800}
+  .tabelle tr.ich td{background:rgba(255,216,74,.22)}
+  .tabelle tr.gegner td{background:rgba(0,0,0,.18)}
+  .tabelle.kader tr.bank td{opacity:.72;font-weight:600}
+  .tabelle.kader td.ges{color:var(--flutlicht)}
+  .ergebnisse{list-style:none;margin:0 0 12px;padding:0;font-size:15px;font-weight:600;columns:2;column-gap:14px}
+  .ergebnisse li{padding:1px 0}
+  .ergebnisse li.ich{font-weight:800;color:var(--flutlicht)}
+  .unterkopf{font-size:22px;font-weight:800;margin:10px 0 6px}
+  .trainingsliste{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+  .trainingszeile{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:16px;font-weight:700}
+  .trainingszeile .knopf.klein,.angebot .knopf.klein{width:auto;flex:none}
+  .knopf:disabled{opacity:.45;cursor:default}
+  .angebot{background:rgba(0,0,0,.22);border-radius:10px;padding:10px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+  .angebotkopf{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:16px;font-weight:700}
+  .angebotkopf b{font-size:20px;color:var(--flutlicht)}
+  .angebotwerte{display:flex;gap:10px;flex-wrap:wrap;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+  .angebotwerte .ges{color:var(--flutlicht)}
   .pokal{display:block;width:120px;height:120px;margin:0 auto 8px}
   .feld{font:inherit;font-weight:700;font-size:19px;width:min(220px,55vw);padding:7px 10px;border-radius:8px;border:2px solid rgba(244,247,242,.6);background:rgba(0,0,0,.25);color:var(--kreide);user-select:text;-webkit-user-select:text}
   .feld::placeholder{color:rgba(244,247,242,.55)}
@@ -259,8 +297,9 @@
   }
   @media (max-height:520px) and (min-width:640px){
     .karte{width:min(860px,100%)}
-    .einstellungen{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,auto);grid-auto-flow:column;column-gap:24px;margin-bottom:10px}
+    .einstellungen{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(5,auto);grid-auto-flow:column;column-gap:24px;margin-bottom:10px}
     .einstellungen .zeile:last-child{border-bottom:2px solid rgba(244,247,242,.3)}
+    .einstellungen .zeile:first-child{grid-column:1 / -1}
   }
   @media (orientation:portrait) and (max-width:700px){
     .touch .quer{display:block;margin:0 0 12px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.25);font-size:16px;font-weight:700}
@@ -289,6 +328,8 @@
   <div class="tipp" id="tipp"></div>
   <div class="elfer" id="elfer"></div>
   <div class="wdh" id="wdh">WIEDERHOLUNG</div>
+  <div class="spielerkarte" id="spielerkarte"></div>
+  <div class="pu" id="puAnzeige"></div>
   <div class="kraft" id="kraft"><i id="kraftFuell"></i></div>
   <canvas class="radar" id="radar" width="352" height="228" aria-hidden="true"></canvas>
 </div>
@@ -296,6 +337,9 @@
   <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3" width="4" height="14" rx="1" fill="currentColor"/><rect x="12" y="3" width="4" height="14" rx="1" fill="currentColor"/></svg>
 </button>
 <button class="rund tonknopf" id="tonknopf" aria-label="Ton aus"></button>
+<button class="rund kameraknopf" id="kameraknopf" aria-label="Kamera wechseln">
+  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 6.5h3l1.5-2h7L15 6.5h3v9H2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="10" cy="11" r="2.8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+</button>
 
 <div class="touch-ui" id="touchUi">
   <div class="stickfeld" id="stickfeld"></div>
@@ -325,10 +369,15 @@
       <div class="wahl" data-einst="modus">
         <button data-wert="freund">Freundschaftsspiel</button>
         <button data-wert="pokal">Pokal</button>
+        <button data-wert="liga">Liga</button>
+        <button data-wert="training">Training</button>
         <button data-wert="online">Online</button>
       </div>
     </div>
-    <div class="zeile"><span>Dein Team</span>
+    <div class="zeile" id="ligaZeile"><span>Karriere</span>
+      <div class="ligainfo"><span id="ligaInfo"></span><button class="link" id="karriereNeu">Neu anfangen</button></div>
+    </div>
+    <div class="zeile" id="teamZeile"><span>Dein Team</span>
       <div class="teamwahl">
         <button class="pfeil" data-team="team" data-schritt="-1" aria-label="Voriges Team">◀</button>
         <output id="teamAnzeige"></output>
@@ -340,6 +389,26 @@
         <button class="pfeil" data-team="gegner" data-schritt="-1" aria-label="Voriger Gegner">◀</button>
         <output id="gegnerAnzeige"></output>
         <button class="pfeil" data-team="gegner" data-schritt="1" aria-label="Nächster Gegner">▶</button>
+      </div>
+    </div>
+    <div class="zeile" id="uebungZeile"><span>Übung</span>
+      <div class="wahl" data-einst="uebung">
+        <button data-wert="freistoss">Freistöße</button>
+        <button data-wert="elfmeter">Elfmeter</button>
+        <button data-wert="ecke">Ecken</button>
+      </div>
+    </div>
+    <div class="zeile" id="arenaZeile"><span>Spielfeld</span>
+      <div class="wahl" data-einst="arena">
+        <button data-wert="stadion">Stadion</button>
+        <button data-wert="halle">Halle</button>
+        <button data-wert="strasse">Straße</button>
+      </div>
+    </div>
+    <div class="zeile" id="extrasZeile"><span>Powerups</span>
+      <div class="wahl" data-einst="powerups">
+        <button data-wert="aus">Aus</button>
+        <button data-wert="an">An</button>
       </div>
     </div>
     <div class="zeile"><span>Spieler</span>
@@ -355,7 +424,7 @@
         <button data-wert="schwer">Schwer</button>
       </div>
     </div>
-    <div class="zeile"><span>Spielzeit</span>
+    <div class="zeile" id="dauerZeile"><span>Spielzeit</span>
       <div class="wahl" data-einst="dauer">
         <button data-wert="2">2 Min.</button>
         <button data-wert="4">4 Min.</button>
@@ -373,12 +442,12 @@
     <p class="steuerung nur-tastatur">
       <kbd>WASD</kbd>/<kbd>Pfeile</kbd> laufen · <kbd>Shift</kbd> sprinten<br>
       <kbd>Leertaste</kbd> Pass · <kbd>Linke Maustaste</kbd> Schuss (halten = fester) · <kbd>Alt</kbd> Heber<br>
-      Ohne Ball: <kbd>Strg</kbd> Grätsche · <kbd>Leertaste</kbd>/<kbd>Q</kbd> Spieler wechseln · <kbd>Alt</kbd> Doppeln · <kbd>P</kbd> Pause<br>
+      Ohne Ball: <kbd>Strg</kbd> Grätsche · <kbd>Leertaste</kbd>/<kbd>Q</kbd> Spieler wechseln · <kbd>Alt</kbd> Doppeln · <kbd>P</kbd> Pause · <kbd>C</kbd> Kamera<br>
       Controller geht auch: A Pass, B Schuss, X Heber, RT Sprint.
     </p>
     <p class="steuerung nur-touch">
       Links wischen zum Laufen (ganz ausgelenkt = Sprint), rechts die Knöpfe: Pass, Schuss (halten = fester), Heber.
-      Ohne Ball wird Pass zu „Wechsel“ und Schuss zu „Grätsche“.
+      Ohne Ball wird Pass zu „Wechsel“ und Schuss zu „Grätsche“. Oben rechts wechselst du die Kamera.
     </p>
 
     <div class="knoepfe">
@@ -400,6 +469,7 @@
 
 <script src="vendor/three.min.js"></script>
 <script src="js/grundlagen.js"></script>
+<script src="js/werte.js"></script>
 <script src="js/ton.js"></script>
 <script src="js/stadion.js"></script>
 <script src="js/figuren.js"></script>
@@ -407,8 +477,10 @@
 <script src="js/ki.js"></script>
 <script src="js/eingabe.js"></script>
 <script src="js/spiel.js"></script>
+<script src="js/spielarten.js"></script>
 <script src="js/elfmeter.js"></script>
 <script src="js/online.js"></script>
+<script src="js/liga.js"></script>
 <script src="js/oberflaeche.js"></script>
 </body>
 </html>

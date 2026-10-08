@@ -58,12 +58,17 @@ function menueEinrichten(){
     Ton.start();
     if (einstellungen.modus === 'pokal') pokalStarten();
     else if (einstellungen.modus === 'online') onlineMenue();
-    else matchStarten({ heim:einstellungen.team, gast:einstellungen.gegner, modus:'freund' });
+    else if (einstellungen.modus === 'liga'){ if (!karriere) karriereNeu(einstellungen.team); ligaZentrale(); }
+    else if (einstellungen.modus === 'training') trainingStarten();
+    else freundStarten();
   });
+  $('karriereNeu').addEventListener('click', () => { Ton.start(); Ton.klick(); $('startEbene').classList.add('aus'); karriereBeendenFragen(); });
   $('pausenknopf').addEventListener('click', () => pauseUmschalten());
   $('tonknopf').addEventListener('click', () => tonUmschalten());
+  $('kameraknopf').addEventListener('click', () => kameraUmschalten());
   eingabe.beiPause = pauseUmschalten;
   eingabe.beiTon = tonUmschalten;
+  eingabe.beiKamera = kameraUmschalten;
   tonKnopfZeigen();
   menueAktualisieren();
 }
@@ -82,8 +87,19 @@ function menueAktualisieren(){
   const [kitA, kitB] = trikotsWaehlen(TEAMS[einstellungen.team], TEAMS[einstellungen.gegner]);
   zeigeTeam($('teamAnzeige'), TEAMS[einstellungen.team], kitA);
   zeigeTeam($('gegnerAnzeige'), TEAMS[einstellungen.gegner], kitB);
-  $('gegnerZeile').style.display = einstellungen.modus === 'freund' ? '' : 'none';
-  $('losKnopf').textContent = { pokal:'Pokal starten', online:'Online spielen' }[einstellungen.modus] || 'Anpfiff!';
+  const modus = einstellungen.modus;
+  const zeige = (id, an) => { $(id).style.display = an ? '' : 'none'; };
+  zeige('gegnerZeile', modus === 'freund' || modus === 'training');
+  zeige('arenaZeile', modus === 'freund');
+  zeige('extrasZeile', modus === 'freund');
+  zeige('uebungZeile', modus === 'training');
+  zeige('dauerZeile', modus !== 'training');
+  zeige('ligaZeile', modus === 'liga');
+  zeige('teamZeile', !(modus === 'liga' && karriere));
+  $('ligaInfo').textContent = ligaInfoText();
+  $('karriereNeu').style.display = karriere ? '' : 'none';
+  $('losKnopf').textContent = { pokal:'Pokal starten', online:'Online spielen', training:'Training starten',
+    liga:karriere ? 'Karriere fortsetzen' : 'Karriere starten' }[modus] || 'Anpfiff!';
   const b = $('bilanz');
   b.textContent = '';
   const spiele = bilanz.siege + bilanz.unentschieden + bilanz.niederlagen;
@@ -91,6 +107,7 @@ function menueAktualisieren(){
     b.appendChild(el('span', null, `Bilanz: ${bilanz.siege} S · ${bilanz.unentschieden} U · ${bilanz.niederlagen} N`));
     b.appendChild(el('span', null, `Tore: ${bilanz.tore}:${bilanz.gegentore}`));
     if (bilanz.pokale) b.appendChild(el('span', null, `🏆 × ${bilanz.pokale}`));
+    if (bilanz.meister) b.appendChild(el('span', null, `Meister × ${bilanz.meister}`));
   }
 }
 
@@ -106,6 +123,7 @@ function zumMenue(){
   spiel.pause = false;
   pokal.aktiv = false;
   eingabe.aktiv = false;
+  WDH.extra = null; WDH.abspielen = null;
   allesLoslassen();
   $('dialogEbene').classList.add('aus');
   $('hud').classList.remove('an');
@@ -118,15 +136,17 @@ function zumMenue(){
 }
 
 /* ---------- Spiele starten ---------- */
-function matchStarten({ heim, gast, modus, runde = 0 }){
+// extra: arena, powerups, groesse, kader, staerken, gegnerStaerke (Liga) werden durchgereicht
+function matchStarten({ heim, gast, modus, runde = 0, gegnerStaerke, ...extra }){
   const basis = STUFEN[einstellungen.stufe];
-  const staerke = (TEAMS[gast].staerke - 3) * 0.08;
-  const stufe = modus === 'pokal' ? basis + runde * 0.28 + staerke : basis + staerke;
-  const groesse = einstellungen.groesse, dauer = einstellungen.dauer;
+  const staerke = ((gegnerStaerke != null ? gegnerStaerke : TEAMS[gast].staerke) - 3) * 0.08;
+  // Im Training ist der Torwart etwas gnädiger, sonst wird es schnell frustrierend
+  const stufe = modus === 'pokal' ? basis + runde * 0.28 + staerke : basis + staerke - (modus === 'training' ? 0.7 : 0);
+  const groesse = extra.groesse || einstellungen.groesse, dauer = einstellungen.dauer;
   $('startEbene').classList.add('aus');
   $('dialogEbene').classList.add('aus');
   if (document.activeElement) document.activeElement.blur();
-  spielStarten({ heim, gast, groesse, stufe, dauer, modus, runde });
+  spielStarten({ ...extra, heim, gast, groesse, stufe, dauer, modus, runde });
   spiel.gezaehlt = false;
   $('hud').classList.add('an');
   eingabe.aktiv = true;
@@ -137,6 +157,11 @@ function matchStarten({ heim, gast, modus, runde = 0 }){
     tippGezeigt = true;
     tippZeigen('Leertaste Pass · Linke Maus Schuss (halten) · Alt Heber · Strg Grätsche · Shift Sprint', 8);
   }
+}
+
+function freundStarten(){
+  matchStarten({ heim:einstellungen.team, gast:einstellungen.gegner, modus:'freund',
+    arena:einstellungen.arena, powerups:einstellungen.powerups === 'an' });
 }
 
 function pokalStarten(){
@@ -188,17 +213,58 @@ function dialogSchliessen(){
 }
 
 function pauseUmschalten(){
+  // Eine Extra-Wiederholung (Szene, Highlights) bricht Esc nur ab
+  if (WDH.extra){ extraEnde(); return; }
   // Online läuft das Spiel für alle weiter
   if (spiel.modus === 'demo' || spiel.modus === 'online') return;
   const offen = !$('dialogEbene').classList.contains('aus');
   if (spiel.pause){ spiel.pause = false; dialogSchliessen(); return; }
   if (offen || ['halbzeit', 'ende'].includes(spiel.phase)) return;
   spiel.pause = true;
+  pauseDialog();
+}
+function pauseDialog(){
   const inhalt = el('p', 'hinweis', `${spiel.teams[0].daten.name} ${spiel.teams[0].tore} : ${spiel.teams[1].tore} ${spiel.teams[1].daten.name}`);
-  dialogZeigen('Pause', inhalt, [
-    { text:'Weiter', aktion:() => { spiel.pause = false; dialogSchliessen(); } },
-    { text:'Aufgeben', zweit:true, aktion:zumMenue }
-  ]);
+  const knoepfe = [{ text:'Weiter', aktion:() => { spiel.pause = false; dialogSchliessen(); } }];
+  if (WDH.gesamt > 60 && spiel.modus !== 'training') knoepfe.push({ text:'Letzte Szene ansehen', zweit:true, aktion:() => extraZeigen([szeneAusschnitt()], pauseDialog) });
+  if (spiel.modus === 'liga' && karriere) knoepfe.push({ text:'Aufgeben (zählt 0:3)', zweit:true, aktion:() => { spieltagAbschliessen(0, 3); ligaZentrale(); } });
+  else knoepfe.push({ text:'Aufgeben', zweit:true, aktion:zumMenue });
+  dialogZeigen('Pause', inhalt, knoepfe);
+}
+
+// Extra-Wiederholung über dem Dialog: Dialog weg, abspielen, danach „zurueck“ aufrufen
+function extraZeigen(ausschnitte, zurueck){
+  $('dialogEbene').classList.add('aus');
+  if (document.activeElement) document.activeElement.blur();
+  allesLoslassen();
+  eingabe.aktiv = true;
+  tippZeigen('Tippen oder Taste: weiter · C: Blickwinkel', 4);
+  // Kurz warten, damit der Tipp zum Überspringen nicht gleich einen Knopf im Dialog trifft
+  extraWiederholung(ausschnitte, () => { allesLoslassen(); eingabe.aktiv = false; setTimeout(zurueck, 300); });
+}
+function highlightsZeigen(zurueck){
+  extraZeigen(WDH.highlights.map(h => ({ ...h })), zurueck);
+}
+function highlightKnopf(zurueck){
+  const n = WDH.highlights.length;
+  return n ? { text:n === 1 ? 'Tor ansehen' : `Alle ${n} Tore ansehen`, zweit:true, aktion:() => highlightsZeigen(zurueck) } : null;
+}
+
+function kameraUmschalten(){
+  if (WDH.abspielen){
+    WDH.ansicht = (WDH.ansicht + 1) % WDH_ANSICHTEN.length;
+    kam.schnitt = true;
+    tippZeigen('Wiederholung: ' + WDH_ANSICHTEN[WDH.ansicht], 2);
+    return;
+  }
+  if (!$('hud').classList.contains('an')) return;
+  const i = KAMERAS.indexOf(einstellungen.kamera);
+  einstellungen.kamera = KAMERAS[(i + 1) % KAMERAS.length];
+  speichern();
+  kam.schnitt = true;
+  let text = 'Kamera: ' + KAMERA_NAME[einstellungen.kamera];
+  if (einstellungen.kamera === 'hinten') text += ' (oben = Richtung gegnerisches Tor)';
+  tippZeigen(text, 3);
 }
 
 function tonUmschalten(){
@@ -258,10 +324,11 @@ function ergebnisBlock(zusatz){
 function zeigeHalbzeit(){
   const inhalt = ergebnisBlock();
   inhalt.appendChild(statistikTabelle());
-  dialogZeigen('Halbzeit', inhalt, [
-    { text:'Zweite Halbzeit', aktion:() => { dialogSchliessen(); zweiteHalbzeit(); } },
-    { text:'Aufgeben', zweit:true, aktion:zumMenue }
-  ]);
+  const knoepfe = [{ text:'Zweite Halbzeit', aktion:() => { dialogSchliessen(); zweiteHalbzeit(); } }];
+  const h = highlightKnopf(zeigeHalbzeit);
+  if (h) knoepfe.push(h);
+  knoepfe.push({ text:'Aufgeben', zweit:true, aktion:zumMenue });
+  dialogZeigen('Halbzeit', inhalt, knoepfe);
 }
 
 function spielEndeEntscheiden(){
@@ -288,7 +355,9 @@ function zeigeEnde(){
     bilanz.tore += a.tore; bilanz.gegentore += b.tore;
     if (pokalsieg) bilanz.pokale++;
     speichern();
+    spiel.ligaLohn = spiel.modus === 'liga' && karriere ? ligaSpielGezaehlt(a.tore, b.tore) : 0;
   }
+  if (spiel.modus === 'liga' && spiel.ligaLohn) zusatz = (zusatz ? zusatz + ' · ' : '') + `+${spiel.ligaLohn} Münzen`;
   if (sieger === 0){ Fans.jubelTeam = 0; Fans.jubelZeit = 6; Ton.jubel(0.9); }
   const inhalt = el('div');
   if (pokalsieg){
@@ -311,10 +380,14 @@ function zeigeEnde(){
       knoepfe.push({ text:'Weiter', aktion:() => { pokal.runde++; pokalRundeZeigen(); } });
     } else titel = 'Ausgeschieden';
     knoepfe.push({ text:'Zum Menü', zweit:knoepfe.length > 0, aktion:zumMenue });
+  } else if (spiel.modus === 'liga'){
+    knoepfe.push({ text:'Weiter zur Tabelle', aktion:ligaZentrale });
   } else {
-    knoepfe.push({ text:'Nochmal', aktion:() => matchStarten({ heim:einstellungen.team, gast:einstellungen.gegner, modus:'freund' }) });
+    knoepfe.push({ text:'Nochmal', aktion:freundStarten });
     knoepfe.push({ text:'Zum Menü', zweit:true, aktion:zumMenue });
   }
+  const h = highlightKnopf(zeigeEnde);
+  if (h) knoepfe.splice(Math.min(1, knoepfe.length), 0, h);
   $('elfer').classList.remove('an');
   dialogZeigen(titel, inhalt, knoepfe);
 }
@@ -349,10 +422,16 @@ function tippZeigen(text, sek){
 const hud = { minute:-1, nachspiel:'', ladung:-1, labels:'' };
 function hudAktualisieren(){
   if (!spiel.teams.length) return;
+  spielerkarteAktualisieren();
+  if (spiel.modus === 'training'){
+    const t = `${training.versuch}/${training.max}`;
+    if (hud.minute !== t){ hud.minute = t; $('uhr').textContent = t; $('nachspiel').textContent = ''; hud.nachspiel = ''; }
+  } else {
   const min = Math.min(45, Math.floor(spiel.uhr / spiel.halbDauer * 45)) + (spiel.halbzeit - 1) * 45 + 1;
   if (min !== hud.minute && spiel.modus !== 'demo'){ hud.minute = min; $('uhr').textContent = Math.min(min, spiel.halbzeit * 45) + "'"; }
   const n = spiel.nachspiel > 0 ? '+' + Math.max(1, Math.ceil(spiel.nachspiel / spiel.halbDauer * 45)) : '';
   if (n !== hud.nachspiel){ hud.nachspiel = n; $('nachspiel').textContent = n; }
+  }
   const l = Math.round(spiel.ladung * 100);
   if (l !== hud.ladung){
     hud.ladung = l;
@@ -411,7 +490,7 @@ let empfaengerTakt = 0, empfaengerVorschau = null;
 function darstellen(dt){
   const zeit = performance.now() / 1000;
   let wdhBall = null;
-  if (spiel.phase === 'wiederholung') wdhBall = wiederholungZeigen(zeit);
+  if (WDH.abspielen) wdhBall = wiederholungZeigen(zeit);
   else {
     for (const p of spiel.alle){
       const h = p.haltung;
@@ -449,10 +528,11 @@ function darstellen(dt){
     Ton.stimmungSetzen(spiel.modus === 'demo' ? 0.12 : 0.22 + Fans.aufregung * 0.6);
   }
   fansAnimieren(dt);
+  powerupsDarstellen(zeit);
   elfmeterDarstellen();
   hudAktualisieren();
-  $('wdh').classList.toggle('an', spiel.phase === 'wiederholung');
-  $('radar').classList.toggle('weg', spiel.phase === 'wiederholung' || spiel.phase === 'elfmeter');
+  $('wdh').classList.toggle('an', !!WDH.abspielen);
+  $('radar').classList.toggle('weg', !!WDH.abspielen || spiel.phase === 'elfmeter');
 }
 
 function markierungenZeigen(zeit, dt){
@@ -481,6 +561,12 @@ function markierungenZeigen(zeit, dt){
 function rahmen(dt){
   spiel.phaseZeit += dt;
   const ph = spiel.phase;
+  if (spiel.modus === 'training'){
+    if (ph === 'spiel'){ for (const k of spiel.steuerer) if (k.spieler) menschAktionen(k); }
+    else if (ph === 'warten') standardWarten(dt);
+    trainingRahmen(dt);
+    return;
+  }
   if (ph === 'spiel'){ for (const k of spiel.steuerer) if (k.spieler) menschAktionen(k); }
   else if (ph === 'warten') standardWarten(dt);
   else if (ph === 'aus'){ if (spiel.phaseZeit > 1.1) umblenden(() => standardAufstellen(spiel.naechster)); }
@@ -510,8 +596,9 @@ function takt(jetzt, zeichnen){
   letzte = jetzt;
   eingabeRahmen(dt);
   for (const k of spiel.steuerer) if (k.e !== eingabe) fernRahmen(k.e, dt);
+  if (WDH.extra) extraSchritt(dt);
   if (online.rolle === 'gast') onlineGastTakt(dt);
-  else if (!spiel.pause){
+  else if (!spiel.pause && !WDH.extra){
     rahmen(dt);
     akku += dt;
     let n = 0;

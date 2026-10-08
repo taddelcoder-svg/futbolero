@@ -15,6 +15,9 @@ const GRAV = 10.5;
 const SCHRITT = 1 / 120;                               // Simulationstakt
 const BANDE = 4.5;                                     // Abstand der Werbebanden von den Linien
 
+// Spielfeld-Art: Stadion, Halle (Glaswände statt Aus) oder Straße (Käfig mit kleinen Toren)
+const ARENA = { art:'stadion', wand:false, wandH:0 };
+
 const TEMPO = { lauf:6.4, sprint:8.7, kiLauf:5.5, kiSprint:8.2 };
 
 /* ---------- Hilfsfunktionen ---------- */
@@ -140,9 +143,10 @@ function speicherLaden(){
 }
 const gespeichert = speicherLaden();
 const einstellungen = Object.assign({
-  modus:'freund', team:0, gegner:1, groesse:5, stufe:'normal', dauer:4, qualitaet:'hoch', ton:true
+  modus:'freund', team:0, gegner:1, groesse:5, stufe:'normal', dauer:4, qualitaet:'hoch', ton:true,
+  arena:'stadion', powerups:'aus', uebung:'freistoss', kamera:'tv'
 }, gespeichert.einstellungen || {});
-const bilanz = Object.assign({ siege:0, unentschieden:0, niederlagen:0, tore:0, gegentore:0, pokale:0 }, gespeichert.bilanz || {});
+const bilanz = Object.assign({ siege:0, unentschieden:0, niederlagen:0, tore:0, gegentore:0, pokale:0, meister:0, training:{} }, gespeichert.bilanz || {});
 function speichern(){
   try { localStorage.setItem(SPEICHER_KEY, JSON.stringify({ einstellungen, bilanz })); } catch (e) { /* privat / voll */ }
 }

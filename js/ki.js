@@ -397,20 +397,22 @@ function torwartParade(p){
   if (ball.besitzer || ball.imTor || p.sperre > 0 || p.fallT > 0) return false;
   if (!imEigenenStrafraum(p)) return false;
   const pr = p.team.twProfil;
+  // Spielerwert „Halten“ und Powerup „Krake“ vergrößern die Reichweite
+  const reich = pr.twReich * p.f.halten * (p.team.pu.mauer > 0 ? 1.7 : 1);
   const dx = ball.x - p.x;
   if (Math.abs(dx) > 0.7) return false;
   const seitlich = ball.z - p.z, hoehe = ball.y;
   let ok;
   if (p.hecht > 0){
     const richtig = Math.sign(seitlich) === Math.sign(p.hechtVz) || Math.abs(seitlich) < 0.6;
-    ok = richtig && Math.abs(seitlich) < pr.twReich + 0.35 && hoehe < 2.55;
+    ok = richtig && Math.abs(seitlich) < reich + 0.35 && hoehe < 2.55;
   } else {
-    ok = Math.abs(seitlich) < 0.62 * pr.twReich + 0.12 && hoehe < 2.35;
+    ok = Math.abs(seitlich) < 0.62 * reich + 0.12 && hoehe < 2.35;
   }
   if (!ok) return false;
   const tempo = Math.hypot(ball.vx, ball.vy, ball.vz);
   const zentral = Math.abs(seitlich) < 0.55 && hoehe < 1.9;
-  if ((tempo < 12 + pr.twReich * 6 && zentral) || tempo < 10) fangen(p);
+  if ((tempo < 12 + reich * 6 && zentral) || tempo < 10) fangen(p);
   else abwehren(p, seitlich);
   if (ball.art === 'schuss' && ball.schussVon && ball.schussVon.team !== p.team) ball.schussVon.team.stat.aufsTor++;
   ball.art = null;
