@@ -1,9 +1,11 @@
 'use strict';
-// Futbolero – Server: liefert das Spiel aus und verbindet Online-Spiele.
+// Futbolero – Server: liefert das Spiel aus, verbindet Online-Spiele und führt die Online-Ligen.
 // Online rechnet der Browser des Gastgebers das Spiel; der Server leitet die Eingaben der
 // Mitspieler an ihn weiter und seinen Spielstand an alle anderen (WebSocket unter /ws).
 // Als Disziplin der Olympiade landet eine Gruppe per Ticket automatisch in einem gemeinsamen
 // Raum; am Ende meldet der Server die Rangliste (olymp.js).
+// Online-Ligen (ligen.js) liegen dauerhaft im Speicher (speicher.js: Supabase oder JSON-Datei);
+// ein Ligaspiel zwischen zwei Menschen läuft in einem eigenen Raum, das Ergebnis trägt der Server ein.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -11,9 +13,14 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const zugang = require('./zugang')({ titel:'Futbolero' });
 const olymp = require('./olymp')({ spiel:'futbolero' });
+const speicher = require('./speicher')(() => ({ ligen:{} }));
 
 const PORT = Number(process.env.PORT) || 10000;
 const TEAM_ANZAHL = 9;                 // Anzahl der Teams im Spiel (js/grundlagen.js)
+// Stärke und Name der Teams wie in js/grundlagen.js (für ausgewürfelte Ligaspiele und Meldungen)
+const TEAM_STAERKEN = [3, 3, 4, 2, 2, 1, 4, 1, 5];
+const TEAM_NAMEN = ['Löwen', 'Haie', 'Adler', 'Füchse', 'Pinguine', 'Flamingos', 'Wölfe', 'Frösche', 'Bären'];
+const ligen = require('./ligen')({ speicher, staerken:TEAM_STAERKEN, teamNamen:TEAM_NAMEN });
 const OLYMP_WARTEN = 60_000;           // so lange wartet ein Olympia-Raum höchstens auf Nachzügler
 const MAX_RAEUME = 60;
 
@@ -48,6 +55,14 @@ function json(res, status, daten){
   res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' });
   res.end(JSON.stringify(daten));
 }
+function jsonLesen(req, max = 8000){
+  return new Promise(ok => {
+    let d = '', zuViel = false;
+    req.on('data', c => { d += c; if (d.length > max){ zuViel = true; req.destroy(); } });
+    req.on('end', () => { if (zuViel) return ok(null); try { ok(JSON.parse(d)); } catch (e) { ok(null); } });
+    req.on('error', () => ok(null));
+  });
+}
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -55,6 +70,15 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/datenschutz' || url.pathname === '/datenschutz.html') return senden(res, path.join(__dirname, 'datenschutz.html'), 'no-cache');
   // Passwort für Familie und Freunde; ein gültiges Olympia-Ticket im Link ersetzt es (zugang.js)
   if (zugang.pruefen(req, res)) return;
+  if (url.pathname === '/api/liga'){
+    if (req.method !== 'POST') return json(res, 405, { fehler:'Nur POST' });
+    return jsonLesen(req).then(m => {
+      let antwort;
+      try { antwort = ligen.api(m); }
+      catch (e) { console.error('Liga-API:', e); antwort = { fehler:'Da ist auf dem Server etwas schiefgegangen.' }; }
+      json(res, antwort.fehler ? 400 : 200, antwort);
+    });
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD'){
     res.writeHead(405, { 'Content-Type':'text/plain; charset=utf-8', Allow:'GET, HEAD' });
     return res.end('Nicht erlaubt');
@@ -116,18 +140,20 @@ function anAlle(raum, m, ausser){
 }
 
 function raumZeigen(raum){
-  const o = raum.olymp;
+  const o = raum.olymp, l = raum.liga;
   const basis = {
-    t:'raum', code:raum.olymp ? null : raum.code, host:raum.host, phase:raum.phase, einst:raum.einst,
+    t:'raum', code:raum.olymp || raum.liga ? null : raum.code, host:raum.host, phase:raum.phase, einst:raum.einst,
     mitglieder:[...raum.mitglieder.values()].map(x => ({ id:x.id, name:x.name, team:x.team })),
-    olymp:o ? { titel:o.titel, erwartet:o.erwartet.map(e => e.n), startIn:raum.phase === 'lobby' ? Math.max(0, Math.ceil((o.startAb - Date.now()) / 1000)) : 0 } : null
+    olymp:o ? { titel:o.titel, erwartet:o.erwartet.map(e => e.n), startIn:raum.phase === 'lobby' ? Math.max(0, Math.ceil((o.startAb - Date.now()) / 1000)) : 0 } : null,
+    liga:l ? { code:l.code, name:l.name, spieltag:l.spieltag, erwartet:l.erwartet.map(e => e.name),
+      startIn:raum.phase === 'lobby' && l.startAb ? Math.max(0, Math.ceil((l.startAb - Date.now()) / 1000)) : null } : null
   };
   for (const x of raum.mitglieder.values()) senden1(x.ws, { ...basis, ich:x.id, zurueck:x.zurueck || null });
   if (o) olympStatus(raum);
 }
 
-function raumErstellen(einst, olympInfo){
-  const code = olympInfo ? olympInfo.key : neuerCode();
+function raumErstellen(einst, olympInfo, key){
+  const code = olympInfo ? olympInfo.key : key || neuerCode();
   const raum = { code, olymp:olympInfo || null, host:null, mitglieder:new Map(), einst:einstPruefen(einst), phase:'lobby',
     stand:[0, 0], startListe:[], gewertet:false };
   raeume.set(code, raum);
@@ -201,13 +227,20 @@ function spielStart(raum){
   hostPruefen(raum);
 }
 
-function spielEnde(raum, tore, schuetzen, abgebrochen){
+function spielEnde(raum, tore, schuetzen, abgebrochen, stat){
   if (raum.phase !== 'spiel') return;
   raum.phase = 'lobby';
-  const t = [Number(tore[0]) || 0, Number(tore[1]) || 0];
+  const t = [Math.max(0, Math.min(30, Math.round(Number(tore[0]) || 0))), Math.max(0, Math.min(30, Math.round(Number(tore[1]) || 0)))];
   const tor = {};
   for (const s of raum.startListe) tor[s.id] = Math.max(0, Math.min(99, Number(schuetzen[s.id]) || 0));
-  anAlle(raum, { t:'ende', tore:t, schuetzen:tor, liste:raum.startListe, abgebrochen:!!abgebrochen });
+  // Ligaspiel: eintragen, außer es wurde schon in der ersten Halbzeit abgebrochen (dann darf man neu spielen)
+  let liga = null;
+  if (raum.liga && !raum.gewertet){
+    if (abgebrochen && (raum.halbzeit || 1) < 2) liga = { gewertet:false, text:'Abgebrochen in der ersten Halbzeit – das Spiel zählt nicht und kann neu gespielt werden.' };
+    else liga = ligen.direktspielWerten(raum.liga, t, tor);
+    if (liga.gewertet) raum.gewertet = true;
+  }
+  anAlle(raum, { t:'ende', tore:t, schuetzen:tor, liste:raum.startListe, abgebrochen:!!abgebrochen, stat:stat ? saeubern(stat) : null, liga });
   if (raum.olymp && !raum.gewertet){
     raum.gewertet = true;
     erledigt.set(raum.code, Date.now());
@@ -215,6 +248,43 @@ function spielEnde(raum, tore, schuetzen, abgebrochen){
   }
   if (!raum.mitglieder.size) raeume.delete(raum.code);
   else raumZeigen(raum);
+}
+
+// Statistik des Gastgebers nur in harmloser Form weitergeben: Zahlen, kurze Texte, begrenzte Tiefe und Länge
+function saeubern(v, tiefe = 0){
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v * 10) / 10 : 0;
+  if (typeof v === 'string') return v.slice(0, 24);
+  if (typeof v === 'boolean') return v;
+  if (tiefe > 4 || !v || typeof v !== 'object') return null;
+  if (Array.isArray(v)) return v.slice(0, 40).map(x => saeubern(x, tiefe + 1));
+  const aus = {};
+  for (const [k, x] of Object.entries(v).slice(0, 30)) if (/^[a-zA-Z]{1,14}$/.test(k)) aus[k] = saeubern(x, tiefe + 1);
+  return aus;
+}
+
+/* ---------- Ligaspiele zwischen zwei Menschen ---------- */
+function ligaBeitreten(ws, code, token){
+  const d = ligen.direktspiel(code, token);
+  if (d.fehler) return senden1(ws, { t:'fehler', text:d.fehler, liga:true });
+  let raum = raeume.get(d.key);
+  if (!raum){
+    if (raeume.size >= MAX_RAEUME) return senden1(ws, { t:'fehler', text:'Gerade sind zu viele Spiele offen.', liga:true });
+    raum = raumErstellen(d.einst, null, d.key);
+    raum.liga = { ...d.info, erwartet:d.erwartet, startAb:0 };
+  }
+  if (raum.phase !== 'lobby') return senden1(ws, { t:'fehler', text:'Euer Ligaspiel läuft schon.', liga:true });
+  // Dieselbe Person nochmal (neu geladen): alte Verbindung ersetzen
+  const alt = raum.mitglieder.get(d.ich.id);
+  if (alt && alt.ws !== ws){ alt.ws.raum = null; raum.mitglieder.delete(d.ich.id); try { alt.ws.close(4002, 'ersetzt'); } catch (e) { /* weg */ } }
+  beitreten(ws, raum, d.ich.id, d.ich.name, d.ich.team === d.paar[0] ? 0 : 1);
+  ligaRaumPruefen(raum);
+}
+const ligaAlleDa = raum => raum.liga.erwartet.every(e => raum.mitglieder.has(e.id));
+// Sind beide da, wird nach kurzem Countdown angepfiffen
+function ligaRaumPruefen(raum){
+  if (!raum.liga || raum.phase !== 'lobby' || raum.gewertet) return;
+  if (!ligaAlleDa(raum)){ if (raum.liga.startAb){ raum.liga.startAb = 0; raumZeigen(raum); } return; }
+  if (!raum.liga.startAb){ raum.liga.startAb = Date.now() + 5000; raumZeigen(raum); }
 }
 
 /* ---------- Olympiade ---------- */
@@ -272,6 +342,12 @@ function olympBeitreten(ws, ticket){
 setInterval(() => {
   const jetzt = Date.now();
   for (const raum of raeume.values()){
+    if (raum.liga && raum.phase === 'lobby' && !raum.gewertet && raum.liga.startAb){
+      if (!ligaAlleDa(raum)) ligaRaumPruefen(raum);
+      else if (jetzt >= raum.liga.startAb) spielStart(raum);
+      else raumZeigen(raum);
+      continue;
+    }
     if (!raum.olymp || raum.phase !== 'lobby' || raum.gewertet) continue;
     if (raum.mitglieder.size && jetzt >= raum.olymp.startAb) spielStart(raum);
     else if (raum.mitglieder.size) raumZeigen(raum);
@@ -311,7 +387,7 @@ wss.on('connection', ws => {
         if (raum) verlassen(ws);
         const f = nameFehler(m.name); if (f) return fehler(f);
         const ziel = raeume.get(String(m.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4));
-        if (!ziel || ziel.olymp) return fehler('Diesen Raum gibt es nicht. Stimmt der Code?');
+        if (!ziel || ziel.olymp || ziel.liga) return fehler('Diesen Raum gibt es nicht. Stimmt der Code?');
         if (ziel.phase !== 'lobby') return fehler('In diesem Raum läuft gerade ein Spiel.');
         if (ziel.mitglieder.size >= proTeam(ziel) * 2) return fehler('Der Raum ist voll.');
         const name = m.name.trim();
@@ -322,6 +398,9 @@ wss.on('connection', ws => {
       case 'olymp':
         if (raum) verlassen(ws);
         return olympBeitreten(ws, m.ticket);
+      case 'liga':
+        if (raum) verlassen(ws);
+        return ligaBeitreten(ws, m.code, m.token);
       case 'verlassen':
         return verlassen(ws);
       case 'sicht':
@@ -335,14 +414,14 @@ wss.on('connection', ws => {
     const istHost = raum.host === ws.id;
     switch (m.t){
       case 'team': {
-        if (raum.phase !== 'lobby' || raum.olymp || (m.team !== 0 && m.team !== 1) || m.team === ich.team) return;
+        if (raum.phase !== 'lobby' || raum.olymp || raum.liga || (m.team !== 0 && m.team !== 1) || m.team === ich.team) return;
         const n = [...raum.mitglieder.values()].filter(x => x.team === m.team).length;
         if (n >= proTeam(raum)) return fehler('In diesem Team ist kein Platz mehr.');
         ich.team = m.team;
         return raumZeigen(raum);
       }
       case 'einst': {
-        if (!istHost || raum.phase !== 'lobby' || raum.olymp) return;
+        if (!istHost || raum.phase !== 'lobby' || raum.olymp || raum.liga) return;
         raum.einst = einstPruefen(m.einst, raum.einst);
         // Bei kleineren Teams müssen eventuell Leute wechseln
         const n = [0, 0];
@@ -353,7 +432,10 @@ wss.on('connection', ws => {
         return raumZeigen(raum);
       }
       case 'start':
-        if (istHost) spielStart(raum);
+        if (!istHost) return;
+        if (raum.liga && !ligaAlleDa(raum)) return fehler('Warte, bis dein Gegner im Raum ist.');
+        if (raum.liga && raum.gewertet) return fehler('Dieses Ligaspiel ist schon gewertet.');
+        spielStart(raum);
         return;
       case 'e':
         // Eingabe eines Mitspielers an den Gastgeber
@@ -363,11 +445,12 @@ wss.on('connection', ws => {
         // Spielstand des Gastgebers an alle anderen
         if (raum.phase !== 'spiel' || !istHost) return;
         if (Array.isArray(m.to)) raum.stand = [Number(m.to[0]) || 0, Number(m.to[1]) || 0];
+        if (m.hz === 1 || m.hz === 2) raum.halbzeit = m.hz;
         if (m.tg && typeof m.tg === 'object') raum.letzteTore = m.tg;
         return anAlle(raum, roh.toString(), ws);
       case 'ende':
         if (!istHost) return;
-        return spielEnde(raum, Array.isArray(m.tore) ? m.tore : raum.stand, m.schuetzen && typeof m.schuetzen === 'object' ? m.schuetzen : {}, false);
+        return spielEnde(raum, Array.isArray(m.tore) ? m.tore : raum.stand, m.schuetzen && typeof m.schuetzen === 'object' ? m.schuetzen : {}, false, m.stat);
     }
   });
   ws.on('close', () => verlassen(ws));
@@ -376,6 +459,16 @@ setInterval(() => {
   for (const ws of wss.clients){ if (!ws.lebt){ ws.terminate(); continue; } ws.lebt = false; try { ws.ping(); } catch (e) { /* weg */ } }
 }, 25_000).unref();
 
-server.listen(PORT, () => console.log(`Futbolero läuft auf Port ${PORT}`));
+// Beim Neustart (z. B. Deploy auf Render) noch ausstehende Änderungen an den Ligen sichern
+for (const signal of ['SIGTERM', 'SIGINT']){
+  process.on(signal, async () => {
+    if (speicher.offen()) await speicher.sichern();
+    else await speicher.fertig();
+    process.exit(0);
+  });
+}
 
-for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => server.close(() => process.exit(0)));
+speicher.laden().then(() => {
+  ligen.aufraeumen();
+  server.listen(PORT, () => console.log(`Futbolero läuft auf Port ${PORT} (Ligen: ${speicher.art})`));
+}).catch(e => { console.error('Start abgebrochen:', e.message); process.exit(1); });

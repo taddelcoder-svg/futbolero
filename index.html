@@ -104,12 +104,17 @@
   .anzeige .stand{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--kreide);color:var(--tafel);font-size:24px;font-variant-numeric:tabular-nums}
   .anzeige .uhr{display:flex;align-items:center;padding:8px 12px;background:#1f2a36;color:var(--flutlicht);font-variant-numeric:tabular-nums;min-width:62px;justify-content:center}
   .anzeige .nach{font-size:15px;margin-left:4px;color:var(--kreide);opacity:.85}
+  .anzeige .nach:not(:empty){margin-left:7px;padding:3px 5px;border-radius:4px;background:#7ee081;color:var(--tafel);opacity:1}
   .meldung{position:absolute;left:50%;top:26%;transform:translate(-50%,-50%);text-align:center;white-space:nowrap;opacity:0}
   .meldung b{display:block;font-size:clamp(44px,9vw,92px);font-weight:800;line-height:.9;letter-spacing:.01em;text-shadow:0 4px 0 rgba(0,0,0,.35),0 0 40px rgba(0,0,0,.45)}
   .meldung span{display:block;margin-top:8px;font-size:clamp(18px,2.6vw,26px);font-weight:700;text-shadow:0 2px 10px rgba(0,0,0,.7)}
   .meldung.zeigen{animation:meldung 1.8s ease-out forwards}
   .meldung.bleiben{animation:meldungRein .35s ease-out forwards}
   .meldung.tor b{color:var(--flutlicht);font-size:clamp(70px,15vw,160px)}
+  .meldung.gelb b::before,.meldung.rot b::before{content:"";display:inline-block;width:.42em;height:.6em;margin-right:.22em;border-radius:.06em;vertical-align:-.03em;transform:rotate(-9deg);box-shadow:0 4px 14px rgba(0,0,0,.45)}
+  .meldung.gelb b::before{background:#ffd400}
+  .meldung.rot b::before{background:#e5262b}
+  .meldung.tafel b{color:#7ee081}
   @keyframes meldung{0%{opacity:0;transform:translate(-50%,-40%) scale(.85)}12%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}20%{transform:translate(-50%,-50%) scale(1)}78%{opacity:1}100%{opacity:0;transform:translate(-50%,-56%)}}
   @keyframes meldungRein{0%{opacity:0;transform:translate(-50%,-40%) scale(.85)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
   .kraft{position:absolute;left:50%;bottom:calc(30px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:min(260px,40vw);height:14px;border-radius:7px;
@@ -198,14 +203,34 @@
   .knopf:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.25)}
   .knopf.zweit{background:rgba(0,0,0,.22);color:var(--kreide);border:2px solid rgba(244,247,242,.6);font-size:20px;padding:9px 14px;box-shadow:none}
   .knoepfe{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  #dialogInhalt{margin-top:6px}
   .bilanz{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:16px;font-weight:700;opacity:.9}
   .rechtliches{display:block;margin-top:10px;text-align:center;font-size:15px;color:rgba(244,247,242,.8)}
   .ergebnis{display:flex;align-items:center;justify-content:center;gap:16px;margin:10px 0 16px;font-size:40px;font-weight:800}
   .ergebnis .seite{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:90px;font-size:18px}
   .ergebnis .seite svg{width:44px;height:44px}
-  .statistik{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:18px;font-weight:700}
-  .statistik td{padding:5px 4px;border-top:2px solid rgba(244,247,242,.25);text-align:center;font-variant-numeric:tabular-nums}
-  .statistik td:nth-child(2){font-weight:600;opacity:.85;font-size:16px}
+  .ergebnis .stand{align-self:flex-start;margin-top:8px;white-space:nowrap;flex:none}
+  .ergebnis .seite{flex:1 1 0;min-width:0}
+  .ergebnis .torschuetzen{max-width:170px;text-align:center;font-size:14px;font-weight:600;line-height:1.25;opacity:.9}
+  .statbox{margin-bottom:14px}
+  .sds{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0 0 10px;padding:7px 10px;border-radius:8px;background:rgba(0,0,0,.24);font-size:16px;font-weight:700}
+  .sds b{color:var(--flutlicht);font-weight:800}
+  .wahl.reiter,.wahl.teamreiter{justify-content:flex-start;margin-bottom:8px}
+  .wahl.teamreiter button{display:flex;align-items:center;gap:6px}
+  .wahl.teamreiter .trikot{width:18px;height:18px}
+  .statistik{margin-bottom:6px}
+  .statzeile{display:grid;grid-template-columns:4em 1fr 4em;align-items:center;gap:3px 8px;padding:5px 0 6px;border-top:2px solid rgba(244,247,242,.2);font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+  .statzeile span:nth-child(2){text-align:center;font-size:15px;font-weight:600;opacity:.88}
+  .statzeile span:nth-child(3){text-align:right}
+  .statbalken{grid-column:1 / -1;display:flex;gap:2px;height:6px;border-radius:3px;overflow:hidden;background:rgba(0,0,0,.25)}
+  .statbalken i{display:block;height:100%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
+  .mini-karte{display:inline-block;width:9px;height:13px;margin:0 4px 0 2px;border-radius:2px;vertical-align:-1px;transform:rotate(-8deg)}
+  .mini-karte.gelb{background:#ffd400}
+  .mini-karte.rot{background:#e5262b}
+  .kartenliste{line-height:1.6}
+  .tabelle.spielerstat td.name{white-space:nowrap}
+  .tabelle.spielerstat td.note.gut{color:#7ee081}
+  .tabelle.spielerstat td.note.schwach{color:#ffb3a8}
   .baum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 16px;font-size:16px;font-weight:700}
   .baum div{background:rgba(0,0,0,.22);border-radius:8px;padding:8px;text-align:center;border:2px solid transparent}
   .baum div.jetzt{border-color:var(--flutlicht)}
@@ -231,6 +256,15 @@
   .ergebnisse{list-style:none;margin:0 0 12px;padding:0;font-size:15px;font-weight:600;columns:2;column-gap:14px}
   .ergebnisse li{padding:1px 0}
   .ergebnisse li.ich{font-weight:800;color:var(--flutlicht)}
+  .ergebnisse li.mensch{font-weight:800}
+  .ergebnisse li small{font-weight:600;opacity:.75}
+  .ergebnisse.mitglieder{columns:1}
+  .tabelle tr.mensch td{font-weight:800}
+  .tabelle td.name small.besitzer{font-size:13px;font-weight:600;opacity:.8;margin-left:2px}
+  .ligaliste{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+  .ligaliste .knopf{text-align:left}
+  .meinspiel b{font-size:19px;color:var(--flutlicht)}
+  .meinspiel span{font-size:16px;font-weight:600}
   .unterkopf{font-size:22px;font-weight:800;margin:10px 0 6px}
   .trainingsliste{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
   .trainingszeile{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:16px;font-weight:700}
@@ -287,9 +321,8 @@
     .ergebnis{margin:2px 0 8px;font-size:30px;gap:12px}
     .ergebnis .seite{font-size:16px}
     .ergebnis .seite svg{width:30px;height:30px}
-    .statistik{font-size:15px;margin-bottom:10px}
-    .statistik td{padding:2px 4px}
-    .statistik td:nth-child(2){font-size:14px}
+    .statzeile{font-size:15px;padding:2px 0 3px}
+    .statzeile span:nth-child(2){font-size:14px}
     .hinweis{margin-bottom:8px}
     .baum{margin-bottom:10px}
     .pokal{width:70px;height:70px}
@@ -372,7 +405,11 @@
         <button data-wert="liga">Liga</button>
         <button data-wert="training">Training</button>
         <button data-wert="online">Online</button>
+        <button data-wert="ligaonline">Online-Liga</button>
       </div>
+    </div>
+    <div class="zeile" id="ligaOnlineZeile"><span>Online-Liga</span>
+      <div class="ligainfo"><span id="ligaOnlineInfo"></span></div>
     </div>
     <div class="zeile" id="ligaZeile"><span>Karriere</span>
       <div class="ligainfo"><span id="ligaInfo"></span><button class="link" id="karriereNeu">Neu anfangen</button></div>
@@ -411,13 +448,13 @@
         <button data-wert="an">An</button>
       </div>
     </div>
-    <div class="zeile"><span>Spieler</span>
+    <div class="zeile" id="groesseZeile"><span>Spieler</span>
       <div class="wahl" data-einst="groesse">
         <button data-wert="5">5 gegen 5</button>
         <button data-wert="7">7 gegen 7</button>
       </div>
     </div>
-    <div class="zeile"><span>Stärke</span>
+    <div class="zeile" id="stufeZeile"><span>Stärke</span>
       <div class="wahl" data-einst="stufe">
         <button data-wert="leicht">Leicht</button>
         <button data-wert="normal">Normal</button>
@@ -481,6 +518,7 @@
 <script src="js/elfmeter.js"></script>
 <script src="js/online.js"></script>
 <script src="js/liga.js"></script>
+<script src="js/ligaonline.js"></script>
 <script src="js/oberflaeche.js"></script>
 </body>
 </html>

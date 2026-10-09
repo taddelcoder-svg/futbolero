@@ -5,7 +5,7 @@
 
 const online = {
   ws:null, rolle:'aus',          // aus, lobby, host, gast
-  ich:null, raum:null, host:false, olymp:null, zurueck:null,
+  ich:null, raum:null, host:false, olymp:null, zurueck:null, liga:null,
   staende:[], ev:[], sendeTakt:0, letzteEingabe:'', eingabeZeit:0, schilder:[], ende:null, wegTore:{}
 };
 const VERZOEGERUNG = 100;        // ms, um die Gäste den Spielstand hinterherzeigen
@@ -29,7 +29,9 @@ function onlineVerbinden(ticket){
       if (war !== 'aus'){
         online.rolle = 'aus';
         if (war === 'host' || war === 'gast' || war === 'lobby'){
-          dialogZeigen('Verbindung weg', el('p', 'hinweis', 'Die Verbindung zum Server ist abgerissen.'), [{ text:'Zum Menü', aktion:zumMenue }]);
+          const knoepfe = online.liga ? [{ text:'Zurück zur Liga', aktion:() => ligaOnlineZeigen(online.liga) }] : [];
+          knoepfe.push({ text:'Zum Menü', zweit:knoepfe.length > 0, aktion:zumMenue });
+          dialogZeigen('Verbindung weg', el('p', 'hinweis', 'Die Verbindung zum Server ist abgerissen.'), knoepfe);
         }
       }
     };
@@ -90,12 +92,20 @@ function lobbyZeigen(){
   if (!r) return;
   const ichHost = r.host === online.ich;
   const inhalt = el('div');
+  const fest = !!(r.olymp || r.liga);   // Olympia und Liga: Teams und Regeln stehen schon fest
   if (r.olymp){
     const da = r.mitglieder.map(m => m.name);
     const fehlt = r.olymp.erwartet.filter(n => !da.includes(n));
     inhalt.appendChild(el('p', 'hinweis', fehlt.length
       ? `Warte auf ${fehlt.join(', ')} … Anpfiff spätestens in ${r.olymp.startIn} s.`
       : `Alle da – gleich geht es los.`));
+  } else if (r.liga){
+    const da = r.mitglieder.map(m => m.name);
+    const fehlt = r.liga.erwartet.filter(n => !da.includes(n));
+    inhalt.appendChild(el('p', 'hinweis', `${r.liga.name} · ${r.liga.spieltag + 1}. Spieltag`));
+    inhalt.appendChild(el('p', 'hinweis', fehlt.length
+      ? `Warte auf ${fehlt.join(', ')} … Sag Bescheid, dass es losgeht: In der Liga auf „Zum Ligaspiel“ tippen.`
+      : r.liga.startIn != null ? `Beide da – Anpfiff in ${r.liga.startIn} s.` : 'Beide da – gleich geht es los.'));
   } else {
     const c = el('p', 'raumcode');
     c.appendChild(el('span', null, 'Raum-Code'));
@@ -108,7 +118,7 @@ function lobbyZeigen(){
   [[r.einst.heim, kitA, 0], [r.einst.gast, kitB, 1]].forEach(([t, kit, i]) => {
     const sp = el('div', 'lobby-team');
     const kopf = el('div', 'lobby-kopf');
-    if (ichHost && !r.olymp){
+    if (ichHost && !fest){
       const pfeil = (text, schritt) => {
         const b = el('button', 'pfeil', text);
         b.setAttribute('aria-label', schritt < 0 ? 'Voriges Team' : 'Nächstes Team');
@@ -124,7 +134,7 @@ function lobbyZeigen(){
     }
     kopf.appendChild(trikotSvg(kit));
     kopf.appendChild(el('b', null, TEAMS[t].name));
-    if (ichHost && !r.olymp){
+    if (ichHost && !fest){
       const b = el('button', 'pfeil', '▶');
       b.setAttribute('aria-label', 'Nächstes Team');
       b.addEventListener('click', () => {
@@ -146,7 +156,7 @@ function lobbyZeigen(){
     if (frei > 0) liste.appendChild(el('li', 'leer', `${frei} × Computer`));
     sp.appendChild(liste);
     const meins = r.mitglieder.find(x => x.id === online.ich);
-    if (!r.olymp && meins && meins.team !== i && frei > 0){
+    if (!fest && meins && meins.team !== i && frei > 0){
       const b = el('button', 'knopf zweit klein', 'Hierhin wechseln');
       b.addEventListener('click', () => onlineSenden({ t:'team', team:i }));
       sp.appendChild(b);
@@ -155,7 +165,7 @@ function lobbyZeigen(){
   });
   inhalt.appendChild(spalten);
   const stufen = { leicht:'Leicht', normal:'Normal', schwer:'Schwer' };
-  if (ichHost && !r.olymp){
+  if (ichHost && !fest){
     const wahl = (label, feld, werte) => {
       const z = el('div', 'zeile');
       z.appendChild(el('span', null, label));
@@ -176,11 +186,13 @@ function lobbyZeigen(){
     inhalt.appendChild(el('p', 'hinweis', `${r.einst.groesse} gegen ${r.einst.groesse} · ${r.einst.dauer} Minuten · Computer ${stufen[r.einst.stufe]}`));
   }
   const knoepfe = [];
-  if (ichHost) knoepfe.push({ text:'Anpfiff!', aktion:() => onlineSenden({ t:'start' }) });
+  if (ichHost && !r.liga) knoepfe.push({ text:'Anpfiff!', aktion:() => onlineSenden({ t:'start' }) });
   if (r.olymp){
     if (online.zurueck) knoepfe.push({ text:'Zurück zur Olympiade', zweit:true, aktion:() => { location.href = online.zurueck; } });
+  } else if (r.liga){
+    knoepfe.push({ text:'Zurück zur Liga', zweit:true, aktion:() => { const c = r.liga.code; onlineTrennen(); ligaOnlineZeigen(c); } });
   } else knoepfe.push({ text:'Raum verlassen', zweit:true, aktion:() => { onlineTrennen(); zumMenue(); } });
-  dialogZeigen(r.olymp ? r.olymp.titel : 'Online-Raum', inhalt, knoepfe);
+  dialogZeigen(r.olymp ? r.olymp.titel : r.liga ? 'Ligaspiel' : 'Online-Raum', inhalt, knoepfe);
 }
 
 /* ---------- Nachrichten vom Server ---------- */
@@ -219,7 +231,11 @@ function onlineNachricht(m){
     case 'ende': return onlineEnde(m);
     case 'host': return gastgeberWechsel(m);
     case 'fehler':
-      if (m.olymp){
+      if (m.liga && online.liga){
+        const code = online.liga;
+        onlineTrennen();
+        dialogZeigen('Ligaspiel', el('p', 'hinweis', m.text), [{ text:'Zurück zur Liga', aktion:() => ligaOnlineZeigen(code) }]);
+      } else if (m.olymp){
         online.rolle = 'aus';
         if (m.zurueck) online.zurueck = m.zurueck;
         dialogZeigen('Olympiade', el('p', 'hinweis', m.text), online.zurueck
@@ -259,7 +275,7 @@ function spielstand(){
   const p = [];
   for (const q of spiel.alle){
     p.push(r2(q.x), r2(q.z), r2(q.y), r2(q.dir), r2(q.lauf), r2(q.tempo), r2(q.schussT), r2(q.graetsche), r2(q.hecht), q.hechtSeite,
-      r2(q.fallT), r2(q.kopfT), (q.jubel ? 1 : 0) | (q.halten && ball.besitzer === q ? 2 : 0) | (q.einwurf << 2));
+      r2(q.fallT), r2(q.kopfT), (q.jubel ? 1 : 0) | (q.halten && ball.besitzer === q ? 2 : 0) | (q.einwurf << 2) | (q.weg ? 16 : 0));
   }
   const tg = {};
   for (const k of spiel.steuerer) tg[k.id] = k.tore;
@@ -289,7 +305,7 @@ function onlineHostEnde(){
   for (const k of spiel.steuerer) schuetzen[k.id] = k.tore;
   // Wer das Spiel verlassen hat, behält seine Tore
   for (const id in online.wegTore) if (!(id in schuetzen)) schuetzen[id] = online.wegTore[id];
-  onlineSenden({ t:'ende', tore:spiel.teams.map(t => t.tore), schuetzen });
+  onlineSenden({ t:'ende', tore:spiel.teams.map(t => t.tore), schuetzen, stat:statistikDaten() });
 }
 
 // Geräusche und Meldungen des Gastgebers bei allen anderen abspielen
@@ -376,7 +392,7 @@ function onlineGastTakt(dt){
     q.lauf = L(i, 4); q.tempo = L(i, 5); q.schussT = L(i, 6); q.graetsche = L(i, 7); q.hecht = L(i, 8);
     q.hechtSeite = B.p[o + 9]; q.fallT = L(i, 10); q.kopfT = L(i, 11);
     const fl = B.p[o + 12];
-    q.jubel = !!(fl & 1); q.halten = !!(fl & 2); q.einwurf = fl >> 2;
+    q.jubel = !!(fl & 1); q.halten = !!(fl & 2); q.einwurf = (fl >> 2) & 3; q.weg = !!(fl & 16);
     q.sprungT = 0; q.st = null;
   });
   ball.x = lerp(A.b[0], B.b[0], f); ball.y = lerp(A.b[1], B.b[1], f); ball.z = lerp(A.b[2], B.b[2], f);
@@ -469,11 +485,18 @@ function onlineEnde(m){
   const titel = m.abgebrochen ? 'Spiel abgebrochen' : eig > geg ? 'Sieg!' : eig < geg ? 'Niederlage' : 'Unentschieden';
   if (eig > geg){ Fans.jubelTeam = team; Fans.jubelZeit = 6; Ton.jubel(0.9); }
   const inhalt = el('div');
-  if (spiel.teams.length) inhalt.appendChild(ergebnisBlock(m.abgebrochen ? 'Der Gastgeber hat das Spiel verlassen – der Stand zählt.' : null));
+  const d = m.stat && Array.isArray(m.stat.teams) && m.stat.teams.length === 2 ? m.stat : null;
+  if (d) d.teams.forEach((t, i) => { t.tore = m.tore[i]; });
+  if (d || spiel.teams.length) inhalt.appendChild(ergebnisBlock(m.abgebrochen ? (m.liga ? 'Das Spiel wurde abgebrochen.' : 'Das Spiel wurde abgebrochen – der Stand zählt.') : null, d || statistikDaten()));
   const torschuetzen = m.liste.filter(x => m.schuetzen[x.id] > 0).sort((a, b) => m.schuetzen[b.id] - m.schuetzen[a.id]);
-  if (torschuetzen.length) inhalt.appendChild(el('p', 'hinweis', 'Tore: ' + torschuetzen.map(x => `${x.name} ${m.schuetzen[x.id]}`).join(' · ')));
+  if (torschuetzen.length) inhalt.appendChild(el('p', 'hinweis', 'Eure Tore: ' + torschuetzen.map(x => `${x.name} ${m.schuetzen[x.id]}`).join(' · ')));
+  if (m.liga) inhalt.appendChild(el('p', 'hinweis' + (m.liga.gewertet ? '' : ' fehler'), m.liga.text));
+  if (d) inhalt.appendChild(statistikBereich(d));
   const knoepfe = [];
-  if (online.raum && online.raum.olymp){
+  if (online.raum && online.raum.liga){
+    const code = online.raum.liga.code;
+    knoepfe.push({ text:'Zurück zur Liga', aktion:() => { onlineTrennen(); ligaOnlineZeigen(code); } });
+  } else if (online.raum && online.raum.olymp){
     inhalt.appendChild(el('p', 'hinweis', 'Das Ergebnis ist an die Olympiade gemeldet.'));
     if (online.zurueck) knoepfe.push({ text:'Zurück zur Olympiade', aktion:() => { location.href = online.zurueck; } });
   } else {
