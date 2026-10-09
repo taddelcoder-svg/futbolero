@@ -33,13 +33,14 @@ function taktik(team){
   const b = ball.besitzer;
   const wirHaben = !!b && b.team === team;
   const sieHaben = !!b && b.team !== team;
-  const feld = team.spieler.filter(p => p.rolle !== 'TW');
+  const feld = team.spieler.filter(p => p.rolle !== 'TW' && !p.weg);
   const menschen = team.spieler.filter(p => p.st);
   for (const p of team.spieler){ p.auftrag = 'position'; p.markiert = null; }
 
   if (!b){
     let bester = null;
     for (const p of team.spieler){
+      if (p.weg) continue;
       if (p.rolle === 'TW'){
         const a = abfangen(p, punkte, 0.15);
         p.abfang = a;
@@ -60,7 +61,7 @@ function taktik(team){
     // Um einen umkämpften Ball kümmert sich zur Not ein Zweiter
     if (bester){
       const zweiter = feld.filter(p => p !== bester && !p.st).sort((a, c) => a.abfang.t - c.abfang.t)[0];
-      const gegT = Math.min(...geg.spieler.map(o => abfangen(o, punkte, 0.1).t));
+      const gegT = Math.min(...geg.spieler.filter(o => !o.weg).map(o => abfangen(o, punkte, 0.1).t));
       if (zweiter && zweiter.abfang.t < gegT + 0.3 && zweiter.abfang.t < bester.abfang.t + 0.7 && abstand(zweiter, ball) < 12) zweiter.auftrag = 'ball';
     }
   } else if (wirHaben){
@@ -98,11 +99,11 @@ function formationsPunkt(p, team, angriff){
 function markieren(team, geg){
   const torX = eigenesTorX(team);
   const vergeben = new Set();
-  const decker = team.spieler.filter(p => p.rolle !== 'TW' && p.rolle !== 'ST' && p.auftrag === 'position' && !p.st);
+  const decker = team.spieler.filter(p => p.rolle !== 'TW' && p.rolle !== 'ST' && p.auftrag === 'position' && !p.st && !p.weg);
   for (const p of decker){
     let bester = null, bestD = 14;
     for (const o of geg.spieler){
-      if (o.rolle === 'TW' || o === ball.besitzer || vergeben.has(o)) continue;
+      if (o.rolle === 'TW' || o.weg || o === ball.besitzer || vergeben.has(o)) continue;
       const d = Math.hypot(o.x - p.basis.x, o.z - p.basis.z);
       if (d < bestD){ bestD = d; bester = o; }
     }
@@ -121,9 +122,10 @@ function markieren(team, geg){
 // Anspielbar sein: aus dem Passweg eines Gegners gehen und Abstand zu Mitspielern halten
 function freilaufen(team, geg){
   const b = ball.besitzer;
-  const leute = team.spieler.filter(p => p.rolle !== 'TW' && p !== b);
+  const leute = team.spieler.filter(p => p.rolle !== 'TW' && p !== b && !p.weg);
   for (const p of leute){
     for (const o of geg.spieler){
+      if (o.weg) continue;
       const r = streckenAbstand(o.x, o.z, b.x, b.z, p.basis.x, p.basis.z);
       if (r.t > 0.1 && r.t < 0.95 && r.d < 1.8){
         const dx = p.basis.x - b.x, dz = p.basis.z - b.z, l = Math.hypot(dx, dz) || 1;
@@ -172,9 +174,11 @@ function kiFeldspieler(p, dt){
       zx = ball.x + b.vx * 0.25 + dx / l * vor; zz = ball.z + b.vz * 0.25 + dz / l * vor;
       sprint = d > 2.5;
       mindest = Math.hypot(b.vx, b.vz) * 0.95;
-      // Grätsche, wenn es passt
+      // Grätsche, wenn es passt. Liegt der Gegner näher als der Ball (von hinten), wäre es meist ein Foul –
+      // das trauen sich die Computerspieler nur selten
       const pr = p.team.kiProfil;
-      if (d < 2.3 && d > 0.9 && Math.random() < pr.graetsche * dt * 1.4 && Math.cos(winkelDiff(p.dir, Math.atan2(ball.z - p.z, ball.x - p.x))) > 0.85){
+      const sauber = abstand(p, ball) < d - 0.15 ? 1 : 0.25;
+      if (d < 2.3 && d > 0.9 && Math.random() < pr.graetsche * dt * 1.4 * sauber && Math.cos(winkelDiff(p.dir, Math.atan2(ball.z - p.z, ball.x - p.x))) > 0.85){
         graetsche(p, Math.atan2(ball.z + b.vz * 0.15 - p.z, ball.x + b.vx * 0.15 - p.x));
         return;
       }
@@ -249,7 +253,7 @@ function entscheiden(p){
   // Pass?
   let bester = null;
   for (const m of team.spieler){
-    if (m === p) continue;
+    if (m === p || m.weg) continue;
     const w = passWert(p, m, geg);
     if (w && (!bester || w.wert > bester.wert)) bester = w;
   }
@@ -414,9 +418,9 @@ function torwartParade(p){
   const zentral = Math.abs(seitlich) < 0.55 && hoehe < 1.9;
   if ((tempo < 12 + reich * 6 && zentral) || tempo < 10) fangen(p);
   else abwehren(p, seitlich);
-  if (ball.art === 'schuss' && ball.schussVon && ball.schussVon.team !== p.team) ball.schussVon.team.stat.aufsTor++;
+  if (ball.art === 'schuss' && ball.schussVon && ball.schussVon.team !== p.team){ ball.schussVon.team.stat.aufsTor++; ball.schussVon.ps.aufsTor++; }
   ball.art = null;
-  p.team.stat.paraden++;
+  p.team.stat.paraden++; p.ps.paraden++;
   return true;
 }
 
@@ -447,7 +451,7 @@ function torwartAbspielen(p, dt){
   const geg = gegnerVon(p.team);
   let bester = null;
   for (const m of p.team.spieler){
-    if (m === p) continue;
+    if (m === p || m.weg) continue;
     const d = abstand(m, p);
     if (d < 6 || d > 42) continue;
     let frei = 8;

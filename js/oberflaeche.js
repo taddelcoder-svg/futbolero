@@ -58,6 +58,7 @@ function menueEinrichten(){
     Ton.start();
     if (einstellungen.modus === 'pokal') pokalStarten();
     else if (einstellungen.modus === 'online') onlineMenue();
+    else if (einstellungen.modus === 'ligaonline') ligaOnlineMenue();
     else if (einstellungen.modus === 'liga'){ if (!karriere) karriereNeu(einstellungen.team); ligaZentrale(); }
     else if (einstellungen.modus === 'training') trainingStarten();
     else freundStarten();
@@ -89,17 +90,23 @@ function menueAktualisieren(){
   zeigeTeam($('gegnerAnzeige'), TEAMS[einstellungen.gegner], kitB);
   const modus = einstellungen.modus;
   const zeige = (id, an) => { $(id).style.display = an ? '' : 'none'; };
+  const lo = modus === 'ligaonline';   // Online-Liga: Team und Regeln legt die Liga fest
   zeige('gegnerZeile', modus === 'freund' || modus === 'training');
   zeige('arenaZeile', modus === 'freund');
   zeige('extrasZeile', modus === 'freund');
   zeige('uebungZeile', modus === 'training');
-  zeige('dauerZeile', modus !== 'training');
+  zeige('dauerZeile', modus !== 'training' && !lo);
+  zeige('groesseZeile', !lo);
+  zeige('stufeZeile', !lo);
   zeige('ligaZeile', modus === 'liga');
-  zeige('teamZeile', !(modus === 'liga' && karriere));
+  zeige('ligaOnlineZeile', lo);
+  zeige('teamZeile', !(modus === 'liga' && karriere) && !lo);
   $('ligaInfo').textContent = ligaInfoText();
   $('karriereNeu').style.display = karriere ? '' : 'none';
-  $('losKnopf').textContent = { pokal:'Pokal starten', online:'Online spielen', training:'Training starten',
+  $('losKnopf').textContent = { pokal:'Pokal starten', online:'Online spielen', training:'Training starten', ligaonline:'Zur Online-Liga',
     liga:karriere ? 'Karriere fortsetzen' : 'Karriere starten' }[modus] || 'Anpfiff!';
+  const n = Object.keys(meineLigen()).length;
+  $('ligaOnlineInfo').textContent = n ? `Du spielst in ${n === 1 ? 'einer Liga' : n + ' Ligen'} mit.` : 'Gründe eine Liga mit Freunden oder tritt mit einem Code bei.';
   const b = $('bilanz');
   b.textContent = '';
   const spiele = bilanz.siege + bilanz.unentschieden + bilanz.niederlagen;
@@ -137,12 +144,13 @@ function zumMenue(){
 
 /* ---------- Spiele starten ---------- */
 // extra: arena, powerups, groesse, kader, staerken, gegnerStaerke (Liga) werden durchgereicht
-function matchStarten({ heim, gast, modus, runde = 0, gegnerStaerke, ...extra }){
-  const basis = STUFEN[einstellungen.stufe];
+// stufeName und dauer: feste Regeln (Online-Liga) statt der Einstellungen im Menü
+function matchStarten({ heim, gast, modus, runde = 0, gegnerStaerke, stufeName, ...extra }){
+  const basis = STUFEN[stufeName || einstellungen.stufe];
   const staerke = ((gegnerStaerke != null ? gegnerStaerke : TEAMS[gast].staerke) - 3) * 0.08;
   // Im Training ist der Torwart etwas gnädiger, sonst wird es schnell frustrierend
   const stufe = modus === 'pokal' ? basis + runde * 0.28 + staerke : basis + staerke - (modus === 'training' ? 0.7 : 0);
-  const groesse = extra.groesse || einstellungen.groesse, dauer = einstellungen.dauer;
+  const groesse = extra.groesse || einstellungen.groesse, dauer = extra.dauer || einstellungen.dauer;
   $('startEbene').classList.add('aus');
   $('dialogEbene').classList.add('aus');
   if (document.activeElement) document.activeElement.blur();
@@ -227,9 +235,20 @@ function pauseDialog(){
   const inhalt = el('p', 'hinweis', `${spiel.teams[0].daten.name} ${spiel.teams[0].tore} : ${spiel.teams[1].tore} ${spiel.teams[1].daten.name}`);
   const knoepfe = [{ text:'Weiter', aktion:() => { spiel.pause = false; dialogSchliessen(); } }];
   if (WDH.gesamt > 60 && spiel.modus !== 'training') knoepfe.push({ text:'Letzte Szene ansehen', zweit:true, aktion:() => extraZeigen([szeneAusschnitt()], pauseDialog) });
-  if (spiel.modus === 'liga' && karriere) knoepfe.push({ text:'Aufgeben (zählt 0:3)', zweit:true, aktion:() => { spieltagAbschliessen(0, 3); ligaZentrale(); } });
-  else knoepfe.push({ text:'Aufgeben', zweit:true, aktion:zumMenue });
+  knoepfe.push(aufgebenKnopf());
   dialogZeigen('Pause', inhalt, knoepfe);
+}
+// In den Ligen zählt Aufgeben 0:3 (in der Pause und zur Halbzeit), sonst geht es zurück ins Menü
+function aufgebenKnopf(){
+  if (spiel.modus === 'liga' && karriere) return { text:'Aufgeben (zählt 0:3)', zweit:true, aktion:() => { spiel.gezaehlt = true; spieltagAbschliessen(0, 3); ligaZentrale(); } };
+  if (spiel.modus === 'ligaonline') return { text:'Aufgeben (zählt 0:3)', zweit:true, aktion:async () => {
+    spiel.gezaehlt = true; spiel.pause = false; spiel.phase = 'ende';
+    const code = ligaOnline.spiel.code;
+    dialogZeigen('Aufgegeben', el('p', 'hinweis', 'Das 0:3 wird an die Liga gemeldet …'), []);
+    const r = await ligaErgebnisMelden(0, 3, 0, true);
+    ligaOnlineZeigen(code, r.ok ? null : `Das Ergebnis konnte nicht gemeldet werden: ${r.text}`);
+  } };
+  return { text:'Aufgeben', zweit:true, aktion:zumMenue };
 }
 
 // Extra-Wiederholung über dem Dialog: Dialog weg, abspielen, danach „zurueck“ aufrufen
@@ -288,46 +307,201 @@ function tonKnopfZeigen(){
   k.appendChild(svg);
 }
 
-function statistikTabelle(){
-  const [a, b] = spiel.teams;
-  const gesamt = a.stat.besitz + b.stat.besitz || 1;
-  const zeilen = [
-    ['Schüsse', a.stat.schuesse, b.stat.schuesse],
-    ['Aufs Tor', a.stat.aufsTor, b.stat.aufsTor],
-    ['Ballbesitz', Math.round(a.stat.besitz / gesamt * 100) + ' %', Math.round(b.stat.besitz / gesamt * 100) + ' %'],
-    ['Pässe', `${a.stat.angekommen}/${a.stat.paesse}`, `${b.stat.angekommen}/${b.stat.paesse}`],
-    ['Ecken', a.stat.ecken, b.stat.ecken],
-    ['Paraden', a.stat.paraden, b.stat.paraden]
-  ];
-  const t = el('table', 'statistik');
-  for (const [name, x, y] of zeilen){
-    const tr = el('tr');
-    tr.appendChild(el('td', null, String(x))); tr.appendChild(el('td', null, name)); tr.appendChild(el('td', null, String(y)));
-    t.appendChild(tr);
-  }
-  return t;
+/* ---------- Statistik nach dem Spiel ----------
+   Alles, was nach dem Spiel gezeigt wird, steckt in einem einfachen Objekt. Online schickt der Gastgeber
+   es mit dem Endstand an alle, damit jeder dieselbe Statistik sieht. */
+function spielerNote(p, sieger){
+  const ps = p.ps, team = p.team;
+  let n = 6;
+  n += ps.tore * 1.1 + ps.vorlagen * 0.7 + ps.aufsTor * 0.12 - Math.max(0, ps.schuesse - ps.aufsTor) * 0.05;
+  n += ps.eroberungen * 0.14;
+  if (ps.paesse >= 3) n += (ps.angekommen / ps.paesse - 0.7) * 1.6;
+  n -= ps.fouls * 0.2 + p.gelb * 0.3 + (p.weg ? 1.5 : 0);
+  const gegentore = gegnerVon(team).tore;
+  if (p.rolle === 'TW') n += Math.min(ps.paraden, 10) * 0.2 - gegentore * 0.5 + (gegentore === 0 ? 0.5 : 0);
+  else if (p.rolle === 'AB') n += gegentore === 0 ? 0.4 : -gegentore * 0.12;
+  n += sieger === team.idx ? 0.4 : sieger === -1 ? 0 : -0.3;
+  return clamp(Math.round(n * 10) / 10, 1, 10);
 }
 
-function ergebnisBlock(zusatz){
+function statistikDaten(){
   const [a, b] = spiel.teams;
+  const gesamt = a.stat.besitz + b.stat.besitz || 1;
+  const sieger = a.tore > b.tore ? 0 : b.tore > a.tore ? 1 : -1;
+  let sds = null;
+  const spieler = spiel.teams.map(t => t.spieler.map(p => {
+    const ps = p.ps, note = spielerNote(p, sieger);
+    const zeile = { nr:p.nummer, name:p.name, rolle:p.rolle, tore:ps.tore, vorl:ps.vorlagen, sch:ps.schuesse,
+      pa:ps.paesse, pq:ps.paesse ? Math.round(ps.angekommen / ps.paesse * 100) : -1, erob:ps.eroberungen, par:ps.paraden,
+      fouls:ps.fouls, karte:p.weg ? 'rot' : p.gelb ? 'gelb' : '', note };
+    if (!sds || note > sds.note || (note === sds.note && t.idx === sieger)) sds = { team:t.idx, nr:p.nummer, name:p.name, note };
+    return zeile;
+  }));
+  return {
+    teams:spiel.teams.map(t => ({ name:t.daten.name, kurz:t.daten.kurz, farbe:t.kit.trikot, rand:t.kit.hose, tore:t.tore,
+      s:{ ...t.stat, besitz:Math.round(t.stat.besitz / gesamt * 100) } })),
+    tore:spiel.torliste.slice(0, 40), karten:spiel.karten.slice(0, 30), spieler, sds
+  };
+}
+
+// Kleines Trikot aus den Farben im Statistik-Objekt
+const farbeOk = (c, std = '#8a96a3') => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : std;
+function trikotAus(t){ return trikotSvg({ trikot:farbeOk(t.farbe), hose:farbeOk(t.rand, '#20262e') }); }
+
+function torschuetzenText(d, idx){
+  const nachName = new Map();
+  for (const t of d.tore){
+    if (t.team !== idx) continue;
+    const name = (t.mensch || t.name) + (t.eigentor ? ' (ET)' : '');
+    if (!nachName.has(name)) nachName.set(name, []);
+    nachName.get(name).push(t.min);
+  }
+  return [...nachName].map(([n, m]) => `${n} ${m.join(', ')}`).join(' · ');
+}
+
+function ergebnisBlock(zusatz, d = statistikDaten()){
   const e = el('div', 'ergebnis');
-  const seite = t => { const s = el('div', 'seite'); s.appendChild(trikotSvg(t.kit)); s.appendChild(el('span', null, t.daten.name)); return s; };
-  e.appendChild(seite(a));
-  e.appendChild(el('span', null, `${a.tore} : ${b.tore}`));
-  e.appendChild(seite(b));
+  const seite = (t, i) => {
+    const s = el('div', 'seite');
+    s.appendChild(trikotAus(t)); s.appendChild(el('span', null, t.name));
+    const torText = torschuetzenText(d, i);
+    if (torText) s.appendChild(el('small', 'torschuetzen', torText));
+    return s;
+  };
+  e.appendChild(seite(d.teams[0], 0));
+  e.appendChild(el('span', 'stand', `${d.teams[0].tore} : ${d.teams[1].tore}`));
+  e.appendChild(seite(d.teams[1], 1));
   const w = el('div');
   w.appendChild(e);
   if (zusatz) w.appendChild(el('p', 'hinweis', zusatz));
   return w;
 }
 
+function kartenSymbol(art){ return el('i', 'mini-karte ' + (art === 'gelb' ? 'gelb' : 'rot')); }
+const NOTE_TEXT = n => n.toFixed(1).replace('.', ',');
+
+function statistikBereich(d = statistikDaten()){
+  const box = el('div', 'statbox');
+  if (d.sds){
+    const sds = el('p', 'sds');
+    sds.appendChild(el('b', null, 'Spieler des Spiels'));
+    sds.appendChild(el('span', null, `${d.sds.nr} ${d.sds.name} · ${d.teams[d.sds.team].name} · Note ${NOTE_TEXT(d.sds.note)}`));
+    box.appendChild(sds);
+  }
+  const reiter = el('div', 'wahl reiter');
+  const inhalt = el('div');
+  const ansichten = [['Spiel', () => teamStatistik(d)], ['Spieler', () => spielerStatistik(d, statistikBereich.team || 0)]];
+  const zeigen = i => {
+    statistikBereich.reiter = i;
+    [...reiter.children].forEach((b, j) => b.setAttribute('aria-pressed', String(i === j)));
+    inhalt.textContent = '';
+    inhalt.appendChild(ansichten[i][1]());
+  };
+  ansichten.forEach(([name], i) => {
+    const b = el('button', null, name);
+    b.addEventListener('click', () => { Ton.klick(); zeigen(i); });
+    reiter.appendChild(b);
+  });
+  box.appendChild(reiter);
+  box.appendChild(inhalt);
+  zeigen(statistikBereich.reiter || 0);
+  return box;
+}
+
+function teamStatistik(d){
+  const [a, b] = d.teams.map(t => t.s);
+  const quote = s => s.paesse ? Math.round(s.angekommen / s.paesse * 100) : 0;
+  const zeilen = [
+    ['Ballbesitz', a.besitz, b.besitz, ' %'],
+    ['Schüsse', a.schuesse, b.schuesse],
+    ['Aufs Tor', a.aufsTor, b.aufsTor],
+    ['Pässe', a.paesse, b.paesse],
+    ['Passquote', quote(a), quote(b), ' %'],
+    ['Balleroberungen', a.zweikaempfe, b.zweikaempfe],
+    ['Ecken', a.ecken, b.ecken],
+    ['Paraden', a.paraden, b.paraden],
+    ['Fouls', a.fouls, b.fouls],
+    ['Gelbe Karten', a.gelb, b.gelb],
+    ['Rote Karten', a.rot, b.rot]
+  ];
+  const w = el('div', 'statistik');
+  for (const [name, x, y, einheit = ''] of zeilen){
+    if (name === 'Rote Karten' && !x && !y) continue;
+    const z = el('div', 'statzeile');
+    z.appendChild(el('span', null, x + einheit));
+    z.appendChild(el('span', null, name));
+    z.appendChild(el('span', null, y + einheit));
+    const balken = el('div', 'statbalken');
+    const summe = x + y;
+    const l = el('i'), r = el('i');
+    l.style.width = (summe ? x / summe * 100 : 50) + '%'; l.style.background = farbeOk(d.teams[0].farbe);
+    r.style.width = (summe ? y / summe * 100 : 50) + '%'; r.style.background = farbeOk(d.teams[1].farbe);
+    if (!summe){ l.style.opacity = r.style.opacity = '.25'; }
+    balken.appendChild(l); balken.appendChild(r);
+    z.appendChild(balken);
+    w.appendChild(z);
+  }
+  if (d.karten.length){
+    const k = el('p', 'hinweis klein kartenliste');
+    k.appendChild(el('span', null, 'Karten: '));
+    d.karten.forEach((c, i) => {
+      if (i) k.appendChild(document.createTextNode(' · '));
+      k.appendChild(kartenSymbol(c.art === 'gelb' ? 'gelb' : 'rot'));
+      k.appendChild(document.createTextNode(`${c.name} (${d.teams[c.team].kurz}) ${c.min}${c.art === 'gelbrot' ? ' Gelb-Rot' : ''}`));
+    });
+    w.appendChild(k);
+  }
+  return w;
+}
+
+function spielerStatistik(d, teamIdx){
+  const w = el('div');
+  const wahl = el('div', 'wahl teamreiter');
+  d.teams.forEach((t, i) => {
+    const b = el('button');
+    b.appendChild(trikotAus(t)); b.appendChild(el('span', null, t.name));
+    b.setAttribute('aria-pressed', String(i === teamIdx));
+    b.addEventListener('click', () => { Ton.klick(); statistikBereich.team = i; w.replaceWith(spielerStatistik(d, i)); });
+    wahl.appendChild(b);
+  });
+  w.appendChild(wahl);
+  const t = el('table', 'tabelle spielerstat');
+  const kopf = el('tr');
+  for (const [h, titel] of [['Nr', 'Rückennummer'], ['Name', ''], ['Pos', 'Position'], ['T', 'Tore'], ['V', 'Vorlagen'], ['Sch', 'Schüsse'], ['Pässe', 'Pässe und Passquote'], ['Erob', 'Balleroberungen'], ['Note', 'Bewertung von 1 bis 10']]){
+    const th = el('th', null, h);
+    if (titel) th.title = titel;
+    kopf.appendChild(th);
+  }
+  t.appendChild(kopf);
+  const rang = { TW:0, AB:1, MI:2, ST:3 };
+  for (const sp of d.spieler[teamIdx].slice().sort((a, b) => rang[a.rolle] - rang[b.rolle] || a.nr - b.nr)){
+    const tr = el('tr', d.sds && d.sds.team === teamIdx && d.sds.nr === sp.nr ? 'ich' : '');
+    tr.appendChild(el('td', null, String(sp.nr)));
+    const name = el('td', 'name');
+    name.appendChild(el('span', null, sp.name));
+    if (sp.karte) name.appendChild(kartenSymbol(sp.karte));
+    tr.appendChild(name);
+    tr.appendChild(el('td', null, sp.rolle));
+    tr.appendChild(el('td', null, sp.tore ? String(sp.tore) : '–'));
+    tr.appendChild(el('td', null, sp.vorl ? String(sp.vorl) : '–'));
+    tr.appendChild(el('td', null, sp.rolle === 'TW' ? `${sp.par} P` : String(sp.sch)));
+    tr.appendChild(el('td', null, sp.pa ? `${sp.pa} · ${sp.pq} %` : '–'));
+    tr.appendChild(el('td', null, String(sp.erob)));
+    tr.appendChild(el('td', 'pkt note' + (sp.note >= 8 ? ' gut' : sp.note < 5 ? ' schwach' : ''), NOTE_TEXT(sp.note)));
+    t.appendChild(tr);
+  }
+  w.appendChild(t);
+  w.appendChild(el('p', 'hinweis klein', 'T Tore · V Vorlagen · Sch Schüsse (beim Torwart P = Paraden) · Erob Balleroberungen · Note von 1 bis 10'));
+  return w;
+}
+
 function zeigeHalbzeit(){
   const inhalt = ergebnisBlock();
-  inhalt.appendChild(statistikTabelle());
+  inhalt.appendChild(statistikBereich());
   const knoepfe = [{ text:'Zweite Halbzeit', aktion:() => { dialogSchliessen(); zweiteHalbzeit(); } }];
   const h = highlightKnopf(zeigeHalbzeit);
   if (h) knoepfe.push(h);
-  knoepfe.push({ text:'Aufgeben', zweit:true, aktion:zumMenue });
+  knoepfe.push(aufgebenKnopf());
   dialogZeigen('Halbzeit', inhalt, knoepfe);
 }
 
@@ -356,6 +530,15 @@ function zeigeEnde(){
     if (pokalsieg) bilanz.pokale++;
     speichern();
     spiel.ligaLohn = spiel.modus === 'liga' && karriere ? ligaSpielGezaehlt(a.tore, b.tore) : 0;
+    if (spiel.modus === 'ligaonline'){
+      spiel.ligaStatus = 'Das Ergebnis wird an die Liga gemeldet …';
+      ligaErgebnisMelden(a.tore, b.tore, spiel.ich ? spiel.ich.tore : 0).then(r => {
+        spiel.ligaStatus = r.ok ? 'Das Ergebnis steht in der Ligatabelle.'
+          : `Das Ergebnis konnte nicht gemeldet werden: ${r.text}` + (r.nochmal ? ' Es wird beim nächsten Öffnen der Liga nachgeschickt.' : '');
+        const st = document.getElementById('ligaStatus');
+        if (st) st.textContent = spiel.ligaStatus;
+      });
+    }
   }
   if (spiel.modus === 'liga' && spiel.ligaLohn) zusatz = (zusatz ? zusatz + ' · ' : '') + `+${spiel.ligaLohn} Münzen`;
   if (sieger === 0){ Fans.jubelTeam = 0; Fans.jubelZeit = 6; Ton.jubel(0.9); }
@@ -370,7 +553,8 @@ function zeigeEnde(){
     inhalt.appendChild(svg);
   }
   inhalt.appendChild(ergebnisBlock(zusatz));
-  inhalt.appendChild(statistikTabelle());
+  if (spiel.modus === 'ligaonline'){ const st = el('p', 'hinweis', spiel.ligaStatus); st.id = 'ligaStatus'; inhalt.appendChild(st); }
+  inhalt.appendChild(statistikBereich());
   let titel = sieger === 0 ? 'Sieg!' : sieger === 1 ? 'Niederlage' : 'Unentschieden';
   const knoepfe = [];
   if (spiel.modus === 'pokal'){
@@ -382,6 +566,8 @@ function zeigeEnde(){
     knoepfe.push({ text:'Zum Menü', zweit:knoepfe.length > 0, aktion:zumMenue });
   } else if (spiel.modus === 'liga'){
     knoepfe.push({ text:'Weiter zur Tabelle', aktion:ligaZentrale });
+  } else if (spiel.modus === 'ligaonline'){
+    knoepfe.push({ text:'Weiter zur Liga', aktion:() => ligaOnlineZeigen(ligaOnline.spiel.code) });
   } else {
     knoepfe.push({ text:'Nochmal', aktion:freundStarten });
     knoepfe.push({ text:'Zum Menü', zweit:true, aktion:zumMenue });
@@ -427,9 +613,9 @@ function hudAktualisieren(){
     const t = `${training.versuch}/${training.max}`;
     if (hud.minute !== t){ hud.minute = t; $('uhr').textContent = t; $('nachspiel').textContent = ''; hud.nachspiel = ''; }
   } else {
-  const min = Math.min(45, Math.floor(spiel.uhr / spiel.halbDauer * 45)) + (spiel.halbzeit - 1) * 45 + 1;
-  if (min !== hud.minute && spiel.modus !== 'demo'){ hud.minute = min; $('uhr').textContent = Math.min(min, spiel.halbzeit * 45) + "'"; }
-  const n = spiel.nachspiel > 0 ? '+' + Math.max(1, Math.ceil(spiel.nachspiel / spiel.halbDauer * 45)) : '';
+  const min = spielMinute().text;
+  if (min !== hud.minute && spiel.modus !== 'demo'){ hud.minute = min; $('uhr').textContent = min; }
+  const n = spiel.nachspiel > 0 ? '+' + spiel.nachspiel : '';
   if (n !== hud.nachspiel){ hud.nachspiel = n; $('nachspiel').textContent = n; }
   }
   const l = Math.round(spiel.ladung * 100);
@@ -494,6 +680,7 @@ function darstellen(dt){
   else {
     for (const p of spiel.alle){
       const h = p.haltung;
+      p.figur.wurzel.visible = !p.weg;
       let y = 0;
       if (p.sprungT > 0) y = Math.sin((1 - p.sprungT) * Math.PI) * 0.42;
       if (p.jubel) y = Math.abs(Math.sin(zeit * 7 + p.idx)) * 0.35;
@@ -569,7 +756,7 @@ function rahmen(dt){
   }
   if (ph === 'spiel'){ for (const k of spiel.steuerer) if (k.spieler) menschAktionen(k); }
   else if (ph === 'warten') standardWarten(dt);
-  else if (ph === 'aus'){ if (spiel.phaseZeit > 1.1) umblenden(() => standardAufstellen(spiel.naechster)); }
+  else if (ph === 'aus'){ if (spiel.phaseZeit > ((spiel.naechster && spiel.naechster.warte) || 1.1)) umblenden(() => standardAufstellen(spiel.naechster)); }
   else if (ph === 'tor'){ if (spiel.phaseZeit > 3.3){ if (spiel.modus === 'demo' || spiel.modus === 'online') anstossNachTor(); else wiederholungStarten(); } }
   else if (ph === 'wiederholung') wiederholungSchritt(dt);
   else if (ph === 'pause-halbzeit'){

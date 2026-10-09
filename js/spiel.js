@@ -5,7 +5,10 @@
 const spiel = {
   phase:'start',        // start, warten, spiel, aus, tor, wiederholung, pause-halbzeit, abpfiff, halbzeit, ende, elfmeter
   modus:'demo', optionen:null,
-  zeit:0, phaseZeit:0, uhr:0, halbzeit:1, halbDauer:120, nachspiel:0,
+  zeit:0, phaseZeit:0, uhr:0, halbzeit:1, halbDauer:120,
+  nachspiel:0,          // angesagte Nachspielzeit in Spielminuten (0 = noch keine)
+  unterbrechung:0,      // in dieser Halbzeit durch Tore, Fouls und Karten verlorene Minuten
+  torliste:[], karten:[],
   teams:[], alle:[], steuerer:[], ich:null, standard:null, naechster:null,
   anstossTeam:0, ersterAnstoss:0, kiTakt:0, doppeln:false, ladung:0,
   torschuetze:null, torTeam:null, torSeite:0, torFrame:0, blende:false, pause:false,
@@ -36,7 +39,8 @@ function steuererVerteilen(standardTeam, schuetze){
   for (const k of spiel.steuerer){
     if (vergeben.has(k)) continue;
     let p = k.spieler && k.spieler.team === k.team && k.spieler.rolle !== 'TW' && !k.spieler.st ? k.spieler : null;
-    if (!p) p = k.team.spieler.filter(q => q.rolle !== 'TW' && !q.st).sort((a, b) => rang[a.rolle] - rang[b.rolle])[0] || null;
+    if (p && p.weg) p = null;
+    if (!p) p = k.team.spieler.filter(q => q.rolle !== 'TW' && !q.st && !q.weg).sort((a, b) => rang[a.rolle] - rang[b.rolle])[0] || null;
     k.spieler = p;
     if (p) p.st = k;
   }
@@ -45,7 +49,7 @@ function steuererVerteilen(standardTeam, schuetze){
 // Ein Spieler ohne Steuerer kommt an den Ball: ein Mensch seines Teams übernimmt ihn.
 // Bevorzugt der, der ihm den Ball zugespielt hat, sonst der, dessen Spieler am weitesten weg ist.
 function uebernehmen(p, von){
-  if (!p || p.st || p.rolle === 'TW' || !p.team.mensch) return;
+  if (!p || p.st || p.rolle === 'TW' || p.weg || !p.team.mensch) return;
   let k = von && von.st && von.team === p.team ? von.st : null;
   if (!k){
     let weit = -1;
@@ -63,7 +67,7 @@ function uebernehmen(p, von){
 // mitWerten: Spielerwerte wirken (online nicht, damit es fair bleibt); staerke: für die Grundwerte
 function teamBauen(idx, daten, kit, groesse, mensch, stufe, kader, mitWerten, staerke){
   const team = { idx, daten, kit, seite:idx === 0 ? 1 : -1, mensch, tore:0, spieler:[],
-    stat:{ schuesse:0, aufsTor:0, paesse:0, angekommen:0, besitz:0, paraden:0, ecken:0 },
+    stat:{ schuesse:0, aufsTor:0, paesse:0, angekommen:0, besitz:0, paraden:0, ecken:0, zweikaempfe:0, fouls:0, gelb:0, rot:0 },
     pu:{ turbo:0, kanone:0, mauer:0, eis:0 } };
   team.kiProfil = profil(mensch ? 1 : stufe);
   team.twProfil = profil(mensch ? Math.max(1.1, stufe * 0.5 + 0.6) : stufe);
@@ -80,7 +84,9 @@ function teamBauen(idx, daten, kit, groesse, mensch, stufe, kader, mitWerten, st
       f:mitWerten ? faktorenAus(werte, form.rolle) : NEUTRAL, statue:false,
       x:0, z:0, y:0, vx:0, vz:0, wx:0, wz:0, dir:team.seite > 0 ? 0 : Math.PI, tempo:0, lauf:Math.random() * 6,
       sperre:0, betaeubt:0, schussT:0, kopfT:0, sprungT:0, fallT:0,
-      graetsche:0, graetscheDir:0, graetscheV:0,
+      graetsche:0, graetscheDir:0, graetscheV:0, graetscheBall:false,
+      gelb:0, weg:false,      // Karten; weg = vom Platz gestellt
+      ps:{ tore:0, vorlagen:0, schuesse:0, aufsTor:0, paesse:0, angekommen:0, eroberungen:0, paraden:0, fouls:0, gegentore:0 },
       hecht:0, hechtVz:0, hechtVx:0, hechtSeite:1, hechtHoch:1,
       jubel:false, halten:false, haltZeit:0, einwurf:0, einwurfT:0,
       auftrag:'position', basis:null, abfang:null, blick:null, blickFest:null, markiert:null,
@@ -111,7 +117,7 @@ function spielStarten(opt){
   steuererAnlegen(opt.menschen || (mensch ? [{ id:'ich', team:0 }] : []), opt.ich || 'ich');
   fansEinkleiden(kits[0], kits[1]);
   Object.assign(spiel, {
-    modus:opt.modus, optionen:opt, halbzeit:1, uhr:0, nachspiel:0, halbDauer:opt.dauer * 30,
+    modus:opt.modus, optionen:opt, halbzeit:1, uhr:0, nachspiel:0, unterbrechung:0, torliste:[], karten:[], halbDauer:opt.dauer * 30,
     standard:null, naechster:null, elfmeter:null, pause:false, zeit:0, ladung:0
   });
   aufnahmeStart();
@@ -125,7 +131,7 @@ function spielStarten(opt){
 function wechseln(k, ziel){
   if (!k) return;
   const team = k.team;
-  const frei = p => p.rolle !== 'TW' && (!p.st || p.st === k);
+  const frei = p => p.rolle !== 'TW' && !p.weg && (!p.st || p.st === k);
   if (!ziel){
     // Der Spieler, der am schnellsten am Ball ist (Torwart und Spieler anderer Menschen ausgenommen)
     const bx = ball.x + ball.vx * 0.35, bz = ball.z + ball.vz * 0.35;
@@ -179,7 +185,7 @@ function schiessen(p, kraft, zielZ, fehler, hoch = 0){
   const vec = schussVektor(dx, zz - ball.z, v, w);
   ballSpielen(p, vec.vx, vec.vy, vec.vz, 'schuss', 0.5 + kraft * 0.5);
   ball.schussVon = p;
-  p.team.stat.schuesse++;
+  p.team.stat.schuesse++; p.ps.schuesse++;
   Fans.aufregung = Math.max(Fans.aufregung, 0.7);
 }
 
@@ -206,7 +212,7 @@ function passSpielen(p, m, art, fehler = 0.05){
   const vec = schussVektor(Math.cos(r), Math.sin(r), v * (1 + gauss() * fehler * 0.4), winkel);
   ballSpielen(p, vec.vx, vec.vy, vec.vz, 'pass', art === 'flach' ? 0.35 : 0.5);
   ball.passZiel = m;
-  p.team.stat.paesse++;
+  p.team.stat.paesse++; p.ps.paesse++;
   m.letzterPassVon = p;
   uebernehmen(m, p);
 }
@@ -220,12 +226,12 @@ function passInDenRaum(p, dx, dz, art){
   if (art === 'flach') vec = schussVektor(tx - ball.x, tz - ball.z, clamp(passTempo(d, 3), 7, 24), 0);
   else vec = schussVektor(tx - ball.x, tz - ball.z, heberTempo(d, 0.55, ball.y), 0.55);
   ballSpielen(p, vec.vx, vec.vy, vec.vz, 'pass', 0.45);
-  p.team.stat.paesse++;
+  p.team.stat.paesse++; p.ps.paesse++;
   // Den Mitspieler steuern, der am nächsten am Zielpunkt ist
   if (p.team.mensch){
     let bester = null, bestD = 1e9;
     for (const m of p.team.spieler){
-      if (m === p || m.rolle === 'TW' || (m.st && m.st !== p.st)) continue;
+      if (m === p || m.rolle === 'TW' || m.weg || (m.st && m.st !== p.st)) continue;
       const dd = Math.hypot(m.x - tx, m.z - tz);
       if (dd < bestD){ bestD = dd; bester = m; }
     }
@@ -239,7 +245,7 @@ function passZielWaehlen(p, dx, dz, nurImStrafraum){
   const geg = gegnerVon(p.team);
   let bester = null, bestW = -1e9;
   for (const m of p.team.spieler){
-    if (m === p) continue;
+    if (m === p || m.weg) continue;
     const mx = m.x - p.x, mz = m.z - p.z, d = Math.hypot(mx, mz);
     if (d < 3 || d > 50) continue;
     if (nurImStrafraum && !(Math.abs(m.x - p.team.seite * HL) < STRAF.T + 2 && Math.abs(m.z) < STRAF.B / 2)) continue;
@@ -350,7 +356,7 @@ function menschBewegung(k){
 /* ---------- Grätsche ---------- */
 function graetsche(p, richtung){
   if (p.graetsche > 0 || p.betaeubt > 0 || p.fallT > 0 || p.hecht > 0) return;
-  p.graetsche = 0.001; p.graetscheDir = richtung; p.graetscheV = 10.5;
+  p.graetsche = 0.001; p.graetscheDir = richtung; p.graetscheV = 10.5; p.graetscheBall = false;
   p.dir = richtung;
 }
 
@@ -365,15 +371,95 @@ function graetschTreffer(p){
     ball.vx = Math.cos(r) * v; ball.vz = Math.sin(r) * v; ball.vy = zufall(0, 1.5);
     ball.zuletzt = p; ball.passZiel = null; ball.art = null; ball.gespieltZeit = spiel.zeit;
     p.sperre = 0.3;
+    if (c){ p.ps.eroberungen++; p.team.stat.zweikaempfe++; }
+    p.graetscheBall = true;
     Ton.schuss(0.4);
   }
   for (const o of gegnerVon(p.team).spieler){
-    if (o.fallT > 0 || o.hecht > 0 || o.halten) continue;
+    if (o.fallT > 0 || o.hecht > 0 || o.halten || o.weg) continue;
     if (Math.hypot(o.x - fx, o.z - fz) < 0.6){
+      const hatteBall = ball.besitzer === o;
       o.fallT = 0.001; o.sperre = 1.0;
-      if (ball.besitzer === o){ ball.besitzer = null; ball.vx = o.vx * 0.6; ball.vz = o.vz * 0.6; ball.zuletzt = o; }
+      if (hatteBall){ ball.besitzer = null; ball.vx = o.vx * 0.6; ball.vz = o.vz * 0.6; ball.zuletzt = o; }
+      // Erst den Mann statt den Ball getroffen: Foul
+      if (!p.graetscheBall && spiel.phase === 'spiel'){ foulGeben(p, o, hatteBall); return; }
     }
   }
+}
+
+/* ---------- Fouls und Karten ----------
+   Wer bei der Grätsche zuerst den Gegner statt den Ball trifft, foult. Von hinten oder als letzter Mann
+   gegen einen, der aufs Tor zuläuft, gibt es eher Gelb oder Rot; zweimal Gelb ist Gelb-Rot.
+   Im eigenen Strafraum gibt es Elfmeter, sonst Freistoß. Hat das gefoulte Team den Ball, läuft das Spiel weiter (Vorteil). */
+function foulGeben(taeter, opfer, hatteBall){
+  if (spiel.modus === 'training' || spiel.phase !== 'spiel') return;
+  const team = taeter.team, geg = opfer.team;
+  team.stat.fouls++; taeter.ps.fouls++;
+  // Von hinten: Grätsche in dieselbe Richtung, in die der Gefoulte schaut
+  const vonHinten = Math.cos(winkelDiff(taeter.graetscheDir, opfer.dir)) > 0.45;
+  // Letzter Mann: der Gefoulte läuft mit Ball aufs Tor zu und kein Feldspieler steht mehr dazwischen
+  const torX = eigenesTorX(team), dTor = Math.hypot(opfer.x - torX, opfer.z);
+  const dazwischen = team.spieler.some(m => m !== taeter && m.rolle !== 'TW' && !m.weg && Math.abs(m.x - torX) < Math.abs(opfer.x - torX) - 0.5);
+  const notbremse = hatteBall && dTor < 26 && !dazwischen;
+  let karte = null;
+  if (notbremse && Math.random() < (vonHinten ? 0.5 : 0.25)) karte = 'rot';
+  else if (Math.random() < (notbremse ? 0.85 : vonHinten ? 0.33 : hatteBall ? 0.1 : 0.04)) karte = 'gelb';
+  if (karte === 'gelb' && ++taeter.gelb >= 2) karte = 'gelbrot';
+  // Bei so kleinen Teams fliegt höchstens einer (7 gegen 7: zwei) vom Platz, danach bleibt es bei Gelb
+  const weg = team.spieler.filter(m => m.weg).length;
+  if (karte && karte !== 'gelb' && weg >= (spiel.optionen && spiel.optionen.groesse >= 7 ? 2 : 1)){
+    karte = 'gelb';
+    if (taeter.gelb < 1) taeter.gelb = 1;
+  }
+  const strafstoss = imEigenenStrafraum(taeter, opfer.x, opfer.z);
+  // Vorteil: ein Mitspieler des Gefoulten hat den Ball schon wieder
+  const b = ball.besitzer;
+  if (!karte && !strafstoss && b && b.team === geg && b !== opfer){
+    meldung('Vorteil', `Foul von ${taeter.name} · ${team.daten.kurz}`);
+    return;
+  }
+  if (b){ b.halten = false; ball.besitzer = null; }
+  spiel.unterbrechung += strafstoss ? 0.6 : 0.25;
+  spiel.phase = 'aus'; spiel.phaseZeit = 0;
+  spiel.ladung = 0;
+  const x = clamp(opfer.x, -HL + 1, HL - 1), z = clamp(opfer.z, -HB + 1, HB - 1);
+  spiel.naechster = { art:strafstoss ? 'strafstoss' : 'freistoss', team:geg, x, z, warte:karte ? 2.4 : 1.6 };
+  Ton.pfiff(karte ? 'zwei' : 'kurz');
+  if (strafstoss){ Ton.raunen(); Fans.aufregung = 1; }
+  const folge = strafstoss ? `Elfmeter für die ${geg.daten.name}` : `Freistoß ${geg.daten.name}`;
+  if (karte){
+    karteZeigen(taeter, karte);
+    const titel = { gelb:'Gelbe Karte', gelbrot:'Gelb-Rot', rot:'Rote Karte' }[karte];
+    meldung(titel, `${taeter.nummer} ${taeter.name} (${team.daten.kurz}) · ${folge}`, karte === 'gelb' ? 'gelb' : 'rot');
+  } else meldung(strafstoss ? 'Elfmeter!' : 'Foul', `${taeter.name} (${team.daten.kurz}) · ${folge}`);
+}
+
+function karteZeigen(p, karte){
+  const team = p.team;
+  spiel.unterbrechung += karte === 'gelb' ? 0.3 : 0.5;
+  if (karte === 'gelb'){ team.stat.gelb++; spiel.karten.push({ min:spielMinute().text, team:team.idx, name:p.name, nummer:p.nummer, art:'gelb' }); return; }
+  if (karte === 'gelbrot') team.stat.gelb++;
+  team.stat.rot++;
+  spiel.karten.push({ min:spielMinute().text, team:team.idx, name:p.name, nummer:p.nummer, art:karte });
+  platzverweis(p);
+}
+
+// Vom Platz: Figur weg, der Spieler steht außerhalb und macht nicht mehr mit
+function platzverweis(p){
+  p.weg = true;
+  if (p.st){ const k = p.st; p.st = null; k.spieler = null; wechseln(k); }
+  if (ball.besitzer === p) ball.besitzer = null;
+  zustandZuruecksetzen(p);
+  p.x = (p.team.idx ? 4 : -4) + p.idx * 0.8; p.z = -HB - 9;
+  p.basis = { x:p.x, z:p.z }; p.standardPlatz = null;
+}
+
+// Spielminute wie im Fernsehen: 1' bis 45', in der Nachspielzeit 45+1', 45+2' …
+function spielMinute(){
+  const hd = spiel.halbDauer, basis = (spiel.halbzeit - 1) * 45;
+  if (spiel.uhr < hd){ const m = Math.min(45, Math.floor(spiel.uhr / hd * 45) + 1) + basis; return { min:m, plus:0, text:m + "'" }; }
+  const plus = Math.floor((spiel.uhr - hd) / (hd / 45)) + 1;
+  return { min:basis + 45, plus, text:`${basis + 45}+${plus}'` };
 }
 
 /* ---------- Ballkontakte ---------- */
@@ -382,7 +468,7 @@ function ballKontakte(dt){
   for (const t of spiel.teams){ const tw = t.spieler[0]; if (tw.rolle === 'TW' && torwartParade(tw)) return; }
   let bester = null, bestD = 99, kopf = false;
   for (const p of spiel.alle){
-    if (p.sperre > 0 || p.betaeubt > 0 || p.fallT > 0 || p.hecht > 0 || p.graetsche > 0) continue;
+    if (p.sperre > 0 || p.betaeubt > 0 || p.fallT > 0 || p.hecht > 0 || p.graetsche > 0 || p.weg) continue;
     const d = Math.hypot(ball.x - p.x, ball.z - p.z);
     if (d >= bestD) continue;
     if (ball.y < 0.9 && d < 0.62){ bester = p; bestD = d; kopf = false; }
@@ -406,7 +492,10 @@ function annehmen(p){
     return;
   }
   ball.besitzer = p; ball.zuletzt = p; ball.vy = 0; ball.y = BALL_R;
-  if (ball.art === 'pass' && vorher && vorher.team === p.team && vorher !== p) p.team.stat.angekommen++;
+  if (ball.art === 'pass' && vorher && vorher.team === p.team && vorher !== p){
+    p.team.stat.angekommen++; vorher.ps.angekommen++;
+    p.letzterPassVon = vorher;
+  }
   ball.art = null; ball.passZiel = null;
   p.bekommenZeit = spiel.zeit;
   p.denk = Math.min(p.denk, zufall(0.08, 0.22));
@@ -441,7 +530,7 @@ function kopfball(p){
     const c = Math.cos(r), sn = Math.sin(r);
     ballSpielen(p, vec.vx * c - vec.vz * sn, vec.vy, vec.vx * sn + vec.vz * c, 'schuss', 0.45);
     ball.schussVon = p;
-    p.team.stat.schuesse++;
+    p.team.stat.schuesse++; p.ps.schuesse++;
     return;
   }
   if (absicht === 'pass' || absicht === 'heber'){
@@ -465,7 +554,7 @@ function zweikaempfe(dt){
   if (c.halten || c.einwurf) return;
   const stufe = spiel.optionen ? spiel.optionen.stufe : 1;
   for (const q of gegnerVon(c.team).spieler){
-    if (q.betaeubt > 0 || q.sperre > 0 || q.graetsche > 0 || q.fallT > 0 || q.hecht > 0) continue;
+    if (q.betaeubt > 0 || q.sperre > 0 || q.graetsche > 0 || q.fallT > 0 || q.hecht > 0 || q.weg) continue;
     const dBall = Math.hypot(q.x - ball.x, q.z - ball.z);
     if (dBall > 0.9) continue;
     let rate = (q.st ? 2.6 : q.team.kiProfil.klau) * q.f.abwehr;
@@ -479,6 +568,7 @@ function zweikaempfe(dt){
 
 function eroberung(q, c){
   c.sperre = 0.55; c.betaeubt = 0.22;
+  q.ps.eroberungen++; q.team.stat.zweikaempfe++;
   ball.zuletzt = q; ball.passZiel = null; ball.art = null;
   if (Math.random() < 0.55){
     ball.besitzer = q; q.bekommenZeit = spiel.zeit; q.denk = zufall(0.1, 0.3);
@@ -516,6 +606,7 @@ function dribbeln(dt){
 
 /* ---------- Spieler bewegen ---------- */
 function spielerBewegen(p, dt){
+  if (p.weg){ p.vx = p.vz = p.wx = p.wz = 0; p.tempo = 0; return; }
   p.sperre = Math.max(0, p.sperre - dt);
   p.betaeubt = Math.max(0, p.betaeubt - dt);
   p.schussT = Math.max(0, p.schussT - dt / 0.32);
@@ -580,6 +671,7 @@ function abstossen(){
   const a = spiel.alle;
   for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++){
     const p = a[i], q = a[j];
+    if (p.weg || q.weg) continue;
     const dx = q.x - p.x, dz = q.z - p.z, d = Math.hypot(dx, dz);
     if (d < 0.7 && d > 1e-4){
       const k = (0.7 - d) / 2 / d;
@@ -595,7 +687,7 @@ function kiSchritt(dt){
     spiel.kiTakt -= dt;
     if (spiel.kiTakt <= 0){ spiel.kiTakt = 0.1; for (const t of spiel.teams) taktik(t); }
     for (const p of spiel.alle){
-      if (p.st) continue;
+      if (p.st || p.weg) continue;
       if (p.statue){ p.wx = p.wz = 0; p.blick = Math.atan2(ball.z - p.z, ball.x - p.x); continue; }
       if (p.rolle === 'TW') kiTorwart(p, dt); else kiFeldspieler(p, dt);
     }
@@ -603,6 +695,7 @@ function kiSchritt(dt){
   }
   if (ph === 'warten'){
     for (const p of spiel.alle){
+      if (p.weg) continue;
       if (spiel.standard && p === spiel.standard.schuetze){ p.wx = p.wz = 0; continue; }
       p.blick = Math.atan2(ball.z - p.z, ball.x - p.x);
       if (p.standardPlatz) laufeZu(p, p.standardPlatz.x, p.standardPlatz.z, TEMPO.kiLauf);
@@ -613,11 +706,11 @@ function kiSchritt(dt){
     spiel.kiTakt -= dt;
     if (spiel.kiTakt <= 0){
       spiel.kiTakt = 0.2;
-      for (const t of spiel.teams) for (const p of t.spieler) if (p.rolle !== 'TW') p.basis = formationsPunkt(p, t, false);
+      for (const t of spiel.teams) for (const p of t.spieler) if (p.rolle !== 'TW' && !p.weg) p.basis = formationsPunkt(p, t, false);
     }
     for (const p of spiel.alle){
       p.blick = Math.atan2(ball.z - p.z, ball.x - p.x);
-      if (p.rolle === 'TW' || !p.basis){ p.wx *= 0.9; p.wz *= 0.9; continue; }
+      if (p.rolle === 'TW' || !p.basis || p.weg){ p.wx *= 0.9; p.wz *= 0.9; continue; }
       laufeZu(p, p.basis.x, p.basis.z, TEMPO.kiLauf * 0.6);
     }
     return;
@@ -632,7 +725,7 @@ function jubelSteuerung(){
   for (const p of spiel.alle){
     if (p.team === spiel.torTeam){
       if (p === held){ laufeZu(p, ziel.x, ziel.z, TEMPO.kiSprint * 0.9); p.jubel = spiel.phaseZeit > 0.4; }
-      else if (p.rolle !== 'TW' && held){ laufeZu(p, held.x - s * 1.2, held.z + (p.idx % 2 ? 1.2 : -1.2), TEMPO.kiSprint * 0.85); p.jubel = spiel.phaseZeit > 1.2 && abstand(p, held) < 3; }
+      else if (p.rolle !== 'TW' && held && !p.weg){ laufeZu(p, held.x - s * 1.2, held.z + (p.idx % 2 ? 1.2 : -1.2), TEMPO.kiSprint * 0.85); p.jubel = spiel.phaseZeit > 1.2 && abstand(p, held) < 3; }
       else { p.wx = p.wz = 0; }
     } else {
       p.wx *= 0.9; p.wz *= 0.9;
@@ -721,11 +814,21 @@ function torGefallen(s){
   spiel.torSeite = s; spiel.torTeam = team;
   let held = eigentor || !letzter ? null : letzter;
   if (!held){
-    const kandidaten = team.spieler.filter(p => p.rolle !== 'TW');
+    const kandidaten = team.spieler.filter(p => p.rolle !== 'TW' && !p.weg);
     held = kandidaten.sort((a, b) => abstand(a, ball) - abstand(b, ball))[0];
   }
   spiel.torschuetze = held;
   spiel.torFrame = WDH.gesamt;
+  spiel.unterbrechung += 0.5;
+  // Torschütze, Vorlage und Gegentor fürs Spielerzeugnis
+  const vorlage = !eigentor && letzter && letzter.letzterPassVon && letzter.letzterPassVon.team === team && letzter.letzterPassVon !== letzter
+    && spiel.zeit - letzter.bekommenZeit < 6 ? letzter.letzterPassVon : null;
+  if (!eigentor && letzter){ letzter.ps.tore++; letzter.ps.aufsTor++; }
+  if (vorlage) vorlage.ps.vorlagen++;
+  gegnerVon(team).spieler[0].ps.gegentore++;
+  const mensch = !eigentor && letzter && letzter === ball.stSpieler && ball.stVon && ball.stVon.team === team ? ball.stVon.name : '';
+  spiel.torliste.push({ min:spielMinute().text, team:team.idx, name:eigentor ? letzter.name : held.name, nummer:eigentor ? letzter.nummer : held.nummer,
+    eigentor, vorlage:vorlage ? vorlage.name : '', mensch, stand:`${spiel.teams[0].tore}:${spiel.teams[1].tore}` });
   spiel.anstossTeam = gegnerVon(team).idx;
   ball.besitzer = null;
   Welt.netzWackeln[s] = 1.2;
@@ -738,12 +841,22 @@ function torGefallen(s){
   if (typeof hudStand === 'function') hudStand();
 }
 
+// Nach 45 Minuten zeigt der vierte Offizielle die Nachspielzeit an: eine knappe Minute plus das, was durch
+// Tore, Fouls, Karten und Elfmeter verloren ging. In der zweiten Halbzeit ist es meist etwas mehr.
+function nachspielzeitAnsagen(){
+  const min = clamp(Math.round(zufall(0.5, 1.5) + spiel.unterbrechung + (spiel.halbzeit === 2 ? 0.7 : 0)), 1, 6);
+  spiel.nachspiel = min;
+  meldung('Nachspielzeit', `+${min} ${min === 1 ? 'Minute' : 'Minuten'}`, 'tafel');
+}
 function zeitPruefen(dt){
   if (spiel.modus === 'demo' || spiel.modus === 'training') return;
   if (spiel.uhr < spiel.halbDauer) return;
-  // Kurz nachspielen lassen, solange es vor einem Tor brennt
-  const gefahr = Math.abs(ball.x) > HL - 20 && spiel.nachspiel < 7;
-  if (gefahr){ spiel.nachspiel += dt; return; }
+  if (!spiel.nachspiel) return nachspielzeitAnsagen();
+  const minute = spiel.halbDauer / 45, ende = spiel.halbDauer + spiel.nachspiel * minute;
+  if (spiel.uhr < ende) return;
+  // Einen laufenden Angriff noch zu Ende spielen lassen (höchstens ein paar Sekunden)
+  const gefahr = Math.abs(ball.x) > HL - 20 && spiel.uhr < ende + Math.min(5, minute * 1.5);
+  if (gefahr) return;
   if (ball.besitzer){ ball.besitzer.halten = false; ball.besitzer = null; }
   spiel.ladung = 0;
   if (spiel.halbzeit === 1){
@@ -759,7 +872,7 @@ function zeitPruefen(dt){
 
 function zweiteHalbzeit(){
   for (const t of spiel.teams) t.seite *= -1;
-  spiel.halbzeit = 2; spiel.uhr = 0; spiel.nachspiel = 0;
+  spiel.halbzeit = 2; spiel.uhr = 0; spiel.nachspiel = 0; spiel.unterbrechung = 0;
   spiel.anstossTeam = 1 - spiel.ersterAnstoss;
   umblenden(() => standardAufstellen({ art:'anstoss', team:spiel.teams[spiel.anstossTeam] }));
 }
@@ -794,12 +907,14 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
   ball.imTor = 0; ball.passZiel = null; ball.art = null; ball.zuletzt = null;
   let schuetze = null;
   const sz = Math.sign(z) || 1;
-  const feld = t => t.spieler.filter(p => p.rolle !== 'TW');
+  const feld = t => t.spieler.filter(p => p.rolle !== 'TW' && !p.weg);
+  let direkt = false;
 
   if (art === 'anstoss'){
     ballSetzen(0, BALL_R, 0);
     for (const t of spiel.teams){
       for (const p of t.spieler){
+        if (p.weg) continue;
         const fx = Math.min(0.46, p.form.x * 0.72);
         let px = t.seite * (fx * FELD.L - HL), pz = p.form.z * HB * 0.75;
         if (t !== team && Math.hypot(px, pz) < KREIS + 0.8){ const l = Math.hypot(px, pz) || 1; px = px / l * (KREIS + 0.8); pz = pz / l * (KREIS + 0.8); }
@@ -811,8 +926,9 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
     platz(schuetze, -s * 0.6, 0, 0, 0);
     const neben = f.find(p => p.rolle === 'MI' && p !== schuetze) || f.find(p => p !== schuetze);
     if (neben) platz(neben, -s * 1.2, 4, 0, 0);
-  } else if (art === 'freistoss' || art === 'elfmeter'){
+  } else if ((art === 'freistoss' || art === 'elfmeter') && spiel.modus === 'training'){
     // Training: direkter Freistoß mit Mauer oder Elfmeter, alle außer Schütze und Torwart stehen still
+    direkt = true;
     const torX = s * HL;
     const bx = art === 'elfmeter' ? torX - s * ELFER_ABSTAND : x, bz = art === 'elfmeter' ? 0 : z;
     ballSetzen(bx, BALL_R, bz);
@@ -837,6 +953,19 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
       platz(p, torX - s * (STRAF.T + 3 + i * 2), (i % 2 ? 1 : -1) * (STRAF.B / 2 + 2), bx, bz);
       p.statue = true;
     });
+  } else if (art === 'strafstoss'){
+    // Elfmeter im Spiel: der beste Schütze tritt an, alle anderen warten hinter dem Ball vor dem Strafraum
+    direkt = true;
+    const torX = s * HL, bx = torX - s * ELFER_ABSTAND;
+    ballSetzen(bx, BALL_R, 0);
+    const f = feld(team);
+    schuetze = f.slice().sort((a, b) => b.werte.schuss - a.werte.schuss)[0];
+    platz(schuetze, bx - s * 1.1, 0, torX, 0);
+    platz(geg.spieler[0], torX - s * 0.3, 0, bx, 0);
+    platz(team.spieler[0], eigenesTorX(team) + s * 0.8, 0, bx, 0);
+    const a = f.filter(p => p !== schuetze), v = feld(geg), rest = [];
+    for (let i = 0; i < Math.max(a.length, v.length); i++){ if (v[i]) rest.push(v[i]); if (a[i]) rest.push(a[i]); }
+    rest.forEach((p, i) => platz(p, torX - s * (STRAF.T + 1.2 + (i % 2) * 1.6), (i - (rest.length - 1) / 2) * 2.3, bx, 0));
   } else {
     // Ball liegt am Ausführungsort, danach richten sich die anderen
     let bx = x, bz = z;
@@ -845,6 +974,7 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
     else if (art === 'abstoss'){ bx = eigenesTorX(team) + s * 3.5; bz = sz * 3; }
     ballSetzen(bx, BALL_R, bz);
     for (const t of spiel.teams) for (const p of t.spieler){
+      if (p.weg) continue;
       if (p.rolle === 'TW'){ platz(p, eigenesTorX(t) + t.seite * 0.8, 0, bx, bz); continue; }
       const b = formationsPunkt(p, t, t === team);
       platz(p, b.x, b.z, bx, bz);
@@ -880,22 +1010,44 @@ function standardAufstellen({ art, team, x = 0, z = 0 }){
       for (const p of feld(geg)){
         if (Math.abs(p.x - torX) < STRAF.T + 1.5 && Math.abs(p.z) < STRAF.B / 2 + 1.5) platz(p, torX + s * (STRAF.T + 2), p.z, bx, bz);
       }
+    } else if (art === 'freistoss'){
+      // Freistoß nach Foul. Nah am Tor und nicht zu spitz: direkt, mit Mauer
+      const torX = s * HL, dx = torX - bx, dz = -bz, dTor = Math.hypot(dx, dz) || 1, ux = dx / dTor, uz = dz / dTor;
+      direkt = dTor < 30 && Math.abs(bz) < Math.abs(dx) * 1.3;
+      const f = feld(team);
+      schuetze = direkt ? f.slice().sort((a, b) => b.werte.schuss - a.werte.schuss)[0]
+        : f.slice().sort((a, b) => Math.hypot(a.x - bx, a.z - bz) - Math.hypot(b.x - bx, b.z - bz))[0];
+      platz(schuetze, bx - ux * 0.9, bz - uz * 0.9, torX, 0);
+      if (direkt){
+        // Zwei Angreifer gehen in den Strafraum
+        f.filter(p => p !== schuetze).slice(0, 2).forEach((p, i) => platz(p, torX - s * (7 + i * 3), (i ? -1 : 1) * zufall(1.5, 4), bx, bz));
+        const v = feld(geg), n = Math.min(dTor < 22 ? 3 : 2, Math.max(0, v.length - 1));
+        const mx = bx + ux * 7, mz = bz + uz * 7, qx = -uz, qz = ux;
+        const mauer = v.sort((a, b) => Math.hypot(a.x - mx, a.z - mz) - Math.hypot(b.x - mx, b.z - mz)).slice(0, n);
+        const kurz = Math.sign(bz) || 1, schieb = (qz * kurz > 0 ? 1 : -1) * 0.35;
+        mauer.forEach((p, i) => { const o = (i - (mauer.length - 1) / 2) * 0.62 + schieb; platz(p, mx + qx * o, mz + qz * o, bx, bz); p.statue = true; });
+        platz(geg.spieler[0], torX - s * 0.45, clamp(bz * 0.08, -1, 1), bx, bz);
+      }
     }
     // Gegner halten Abstand zum Ausführenden
     for (const p of geg.spieler){
       const d = Math.hypot(p.x - bx, p.z - bz);
-      if (d < 4 && p.rolle !== 'TW'){ const l = d || 1; platz(p, bx + (p.x - bx) / l * 4, clamp(bz + (p.z - bz) / l * 4, -HB + 0.5, HB - 0.5), bx, bz); }
+      if (d < 4 && p.rolle !== 'TW' && !p.weg && !p.statue){ const l = d || 1; platz(p, bx + (p.x - bx) / l * 4, clamp(bz + (p.z - bz) / l * 4, -HB + 0.5, HB - 0.5), bx, bz); }
     }
   }
   for (const p of spiel.alle){ p.basis = { x:p.x, z:p.z }; }
   ball.besitzer = schuetze;
   schuetze.standardPlatz = null;
-  spiel.standard = { art, team, schuetze, zeit:0 };
+  spiel.standard = { art, team, schuetze, zeit:0, direkt };
   spiel.phase = 'warten'; spiel.phaseZeit = 0;
   if (schuetze.einwurf) dribbeln(0.016);
   steuererVerteilen(team, schuetze);
   if (art === 'anstoss') meldung('Anstoß', team.daten.name);
-  if (art === 'freistoss' || art === 'elfmeter') spiel.standard.bereit = false;
+  if (direkt) spiel.standard.bereit = false;
+  if (spiel.modus !== 'training' && spiel.ich && schuetze.st === spiel.ich){
+    if (art === 'strafstoss') tippZeigen('Elfmeter: Richtung = Ecke · Schuss halten = fester · Heber = Lupfer', 5);
+    else if (art === 'freistoss') tippZeigen(direkt ? 'Freistoß: Schuss halten = fester · Heber über die Mauer · Pass zum Mitspieler' : 'Freistoß: Pass, Heber oder Schuss in Richtung', 5);
+  }
   kam.schnitt = true;
 }
 
@@ -905,7 +1057,7 @@ function standardWarten(dt){
   if (!st || spiel.blende) return;
   st.zeit += dt;
   const p = st.schuetze;
-  if (p.st && (st.art === 'freistoss' || st.art === 'elfmeter')) return direktSchussWarten(st, p);
+  if (p.st && st.direkt) return direktSchussWarten(st, p);
   if (p.st){
     // Zielen: der Ausführende dreht sich in Eingaberichtung
     const e = p.st.e;
@@ -919,7 +1071,7 @@ function standardWarten(dt){
     const aktion = t.pass.neu ? 'pass' : t.heber.neu ? 'heber' : t.schuss.neu ? 'schuss' : null;
     if (aktion) return standardAusfuehren(aktion);
     if (st.zeit > 8) return standardAusfuehren('auto');
-  } else if (st.zeit > (st.art === 'anstoss' ? 1.4 : 1.1)){
+  } else if (st.zeit > (st.art === 'anstoss' ? 1.4 : st.art === 'strafstoss' ? 1.8 : 1.1)){
     return standardAusfuehren('auto');
   }
 }
@@ -931,6 +1083,9 @@ function direktSchussWarten(st, p){
   if (m > 0.2) p.blickFest = Math.atan2(e.z, e.x);
   // Eine Taste, die vom letzten Versuch noch gedrückt ist, zählt erst nach dem Loslassen
   if (!st.bereit){ if (!t.schuss.halten && !t.heber.halten) st.bereit = true; return; }
+  // Im Spiel darf man den Freistoß auch kurz zum Mitspieler spielen
+  if (st.art === 'freistoss' && spiel.modus !== 'training' && t.pass.neu) return standardAusfuehren('pass');
+  if (st.zeit > 12) return standardAusfuehren('auto');
   let kraft = null, hoch = 0;
   if (t.schuss.halten && !t.schuss.verbraucht){
     if (ich) spiel.ladung = Math.min(1, t.schuss.dauer / 0.85);
@@ -941,7 +1096,7 @@ function direktSchussWarten(st, p){
   t.schuss.verbraucht = true;
   spiel.standard = null;
   spiel.phase = 'spiel'; spiel.phaseZeit = 0;
-  for (const q of spiel.alle){ q.blickFest = null; q.standardPlatz = null; }
+  for (const q of spiel.alle){ q.blickFest = null; q.standardPlatz = null; if (spiel.modus !== 'training') q.statue = false; }
   menschSchuss(p, Math.max(0.2, kraft), false, hoch);
   p.sperre = 0.5;
 }
@@ -952,18 +1107,18 @@ function standardAusfuehren(aktion){
   const [rx, rz] = mensch ? eingabeRichtung(p) : [team.seite, 0];
   spiel.standard = null;
   spiel.phase = 'spiel'; spiel.phaseZeit = 0;
-  for (const q of spiel.alle){ q.blickFest = null; q.standardPlatz = null; }
-  const mitspieler = team.spieler.filter(q => q !== p && q.rolle !== 'TW');
+  for (const q of spiel.alle){ q.blickFest = null; q.standardPlatz = null; if (spiel.modus !== 'training') q.statue = false; }
+  const mitspieler = team.spieler.filter(q => q !== p && q.rolle !== 'TW' && !q.weg);
   const naechster = mitspieler.sort((a, b) => abstand(a, p) - abstand(b, p))[0];
   if (st.art === 'anstoss'){
     Ton.pfiff('kurz');
     const m = mensch ? passZielWaehlen(p, rx, rz) || naechster : naechster;
-    passSpielen(p, m, 'flach', 0.02);
+    if (m) passSpielen(p, m, 'flach', 0.02); else passInDenRaum(p, -team.seite * 0.3, 1, 'flach');
   } else if (st.art === 'einwurf'){
     let m = mensch && aktion === 'pass' ? passZielWaehlen(p, rx, rz) : null;
     if (!mensch){
-      const kandidaten = team.spieler.filter(q => q !== p && q.rolle !== 'TW' && abstand(q, p) < 22);
-      m = zufallAus(kandidaten.length ? kandidaten : [naechster]);
+      const kandidaten = mitspieler.filter(q => abstand(q, p) < 22);
+      m = kandidaten.length ? zufallAus(kandidaten) : naechster;
     }
     if (m) passSpielen(p, m, 'wurf', 0.04);
     else {
@@ -974,14 +1129,32 @@ function standardAusfuehren(aktion){
       ballSpielen(p, vec.vx, vec.vy, vec.vz, 'pass', 0.3);
     }
   } else if (st.art === 'ecke'){
-    if (aktion === 'pass') passSpielen(p, mensch ? passZielWaehlen(p, rx, rz) || naechster : naechster, 'flach', 0.03);
+    const kurz = mensch ? passZielWaehlen(p, rx, rz) || naechster : naechster;
+    if (aktion === 'pass' && kurz) passSpielen(p, kurz, 'flach', 0.03);
     else {
       let m = mensch ? passZielWaehlen(p, rx, rz, true) : null;
       if (!m){
         const drin = mitspieler.filter(q => Math.abs(q.x - team.seite * HL) < STRAF.T && Math.abs(q.z) < STRAF.B / 2);
-        m = zufallAus(drin.length ? drin : mitspieler);
+        m = drin.length || mitspieler.length ? zufallAus(drin.length ? drin : mitspieler) : null;
       }
-      passSpielen(p, m, 'flanke', mensch ? 0.03 : 0.06);
+      if (m) passSpielen(p, m, 'flanke', mensch ? 0.03 : 0.06);
+      else passInDenRaum(p, team.seite, -Math.sign(p.z), 'hoch');
+    }
+  } else if (st.art === 'strafstoss'){
+    kiSchuss(p);
+  } else if (st.art === 'freistoss' && spiel.modus !== 'training'){
+    const dTor = Math.hypot(team.seite * HL - p.x, p.z);
+    if (mensch){
+      if (aktion === 'schuss') menschSchuss(p, 0.85);
+      else menschPass(p, aktion === 'heber' ? 'hoch' : 'flach');
+    } else if (st.direkt && (dTor < 24 || Math.random() < 0.45)) kiSchuss(p);
+    else {
+      const drin = mitspieler.filter(q => Math.abs(q.x - team.seite * HL) < STRAF.T + 2 && Math.abs(q.z) < STRAF.B / 2);
+      const e = entscheiden(p);
+      if (drin.length && dTor < 36) passSpielen(p, zufallAus(drin), 'flanke', 0.06);
+      else if (e.art === 'pass') passSpielen(p, e.ziel, e.hoch ? 'hoch' : 'flach', 0.05);
+      else if (naechster) passSpielen(p, naechster, 'flach', 0.04);
+      else kiSchuss(p);
     }
   } else if (st.art === 'freistoss' || st.art === 'elfmeter'){
     kiSchuss(p);

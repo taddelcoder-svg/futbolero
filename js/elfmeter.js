@@ -26,7 +26,7 @@ function elfmeterVorbereiten(){
   if (!E) return;
   const schTeam = spiel.teams[E.dran], twTeam = spiel.teams[1 - E.dran];
   schTeam.seite = 1; twTeam.seite = -1;
-  const schuetzen = schTeam.spieler.filter(p => p.rolle !== 'TW').sort((a, b) => ({ ST:0, MI:1, AB:2 }[a.rolle] - { ST:0, MI:1, AB:2 }[b.rolle]));
+  const schuetzen = schTeam.spieler.filter(p => p.rolle !== 'TW' && !p.weg).sort((a, b) => ({ ST:0, MI:1, AB:2 }[a.rolle] - { ST:0, MI:1, AB:2 }[b.rolle]));
   const sch = schuetzen[E.nr[E.dran] % schuetzen.length];
   E.nr[E.dran]++;
   const tw = twTeam.spieler[0];
