@@ -648,9 +648,15 @@ function radarZeichnen(){
   const g = radar.ctx, W = 352, H = 228, R = 10;
   const sx = x => R + (x + HL) / FELD.L * (W - 2 * R), sz = z => R + (z + HB) / FELD.B * (H - 2 * R);
   g.clearRect(0, 0, W, H);
-  g.fillStyle = 'rgba(8,30,18,.86)';
-  g.beginPath(); g.roundRect ? g.roundRect(0, 0, W, H, 12) : g.rect(0, 0, W, H); g.fill();
-  g.strokeStyle = 'rgba(244,247,242,.55)'; g.lineWidth = 2;
+  // Rasen mit Mähstreifen (Spielfeld-Radar)
+  g.save();
+  g.beginPath(); g.roundRect ? g.roundRect(0, 0, W, H, 14) : g.rect(0, 0, W, H); g.clip();
+  g.fillStyle = 'rgba(9,34,20,.9)'; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(255,255,255,.045)';
+  const streifen = 8, sb = (W - 2 * R) / streifen;
+  for (let i = 0; i < streifen; i += 2) g.fillRect(R + i * sb, R, sb, H - 2 * R);
+  g.restore();
+  g.strokeStyle = 'rgba(244,247,242,.6)'; g.lineWidth = 2; g.lineJoin = 'round';
   g.strokeRect(sx(-HL), sz(-HB), sx(HL) - sx(-HL), sz(HB) - sz(-HB));
   g.beginPath(); g.moveTo(sx(0), sz(-HB)); g.lineTo(sx(0), sz(HB)); g.stroke();
   g.beginPath(); g.arc(sx(0), sz(0), KREIS / FELD.L * (W - 2 * R), 0, Math.PI * 2); g.stroke();
@@ -661,7 +667,7 @@ function radarZeichnen(){
   for (const t of spiel.teams){
     for (const p of t.spieler){
       g.fillStyle = p.rolle === 'TW' ? t.kit.torwart : t.kit.trikot;
-      g.strokeStyle = 'rgba(0,0,0,.7)'; g.lineWidth = 2;
+      g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 2;
       g.beginPath(); g.arc(sx(p.x), sz(p.z), p === spiel.gesteuert ? 9 : 7, 0, Math.PI * 2); g.fill(); g.stroke();
       if (p === spiel.gesteuert){ g.strokeStyle = '#ffd84a'; g.lineWidth = 3; g.beginPath(); g.arc(sx(p.x), sz(p.z), 12, 0, Math.PI * 2); g.stroke(); }
     }
