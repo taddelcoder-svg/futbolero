@@ -721,6 +721,7 @@ function darstellen(dt){
     Ton.stimmungSetzen(spiel.modus === 'demo' ? 0.12 : 0.22 + Fans.aufregung * 0.6);
   }
   fansAnimieren(dt);
+  effekteSchritt(dt, zeit);
   powerupsDarstellen(zeit);
   elfmeterDarstellen();
   hudAktualisieren();
