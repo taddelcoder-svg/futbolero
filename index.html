@@ -664,5 +664,15 @@
   if (document.body) bauen(); else document.addEventListener('DOMContentLoaded', bauen);
 })();
 </script>
+
+<!-- Rangliste der Spielesammlung: meldet Spielzeit, Punkte und Progress -->
+<script>
+window.SLRangAdapter=function(){
+  var b={};try{b=(JSON.parse(localStorage.getItem('futbolero-v1'))||{}).bilanz||{}}catch(e){}
+  var m=(b.meister||0),pk=(b.pokale||0);
+  return{punkte:(b.siege||0)*3+(b.unentschieden||0)+pk*10+m*20,progress:Math.min(100,(m+pk)*25)}
+};
+</script>
+<script src="https://rangliste-aoee.onrender.com/melder.js" data-spiel="Futbolero" defer></script>
 </body>
 </html>
